@@ -1,7 +1,7 @@
 const SECTION_LABELS = {
-  life: 'ライフ部門',
-  work: 'ワーク部門',
-  local: 'ローカル部門'
+  life: '🏡 ライフ部門',
+  work: '💼 ワーク部門',
+  local: '📍 ローカル部門'
 };
 
 const DEFAULT_TEAMS = [
@@ -16,13 +16,40 @@ const DEFAULT_TEAMS = [
 const appState = {
   isOpen: true,
   teams: DEFAULT_TEAMS,
-  votes: []
+  votes: [],
+  hasVoted: false
 };
 
 const voteForm = document.getElementById('vote-form');
 const sectionList = document.getElementById('section-list');
 const voteStatusBadge = document.getElementById('vote-status-badge');
 const voteMessage = document.getElementById('vote-message');
+
+function applyVotedUiState(messageText) {
+  appState.hasVoted = true;
+  const radios = document.querySelectorAll('input[name="teamId"]');
+  const submitButton = document.getElementById('vote-submit');
+  radios.forEach((radio) => {
+    radio.disabled = true;
+  });
+  if (submitButton) {
+    submitButton.disabled = true;
+  }
+  showMessage(voteMessage, messageText || '投票済みです。再送信はできません。', 'success');
+}
+
+function clearVotedUiState() {
+  appState.hasVoted = false;
+  const radios = document.querySelectorAll('input[name="teamId"]');
+  const submitButton = document.getElementById('vote-submit');
+  radios.forEach((radio) => {
+    radio.disabled = !appState.isOpen;
+  });
+  if (submitButton) {
+    submitButton.disabled = !appState.isOpen;
+  }
+  hideMessage(voteMessage);
+}
 
 function showMessage(el, text, type) {
   el.textContent = text;
@@ -126,8 +153,9 @@ function updateVoteStatus() {
   voteStatusBadge.textContent = isOpen ? '受付中' : '停止中';
   voteStatusBadge.className = `badge ${isOpen ? 'open' : 'closed'}`;
   const controls = document.querySelectorAll('input[name="teamId"], #vote-submit');
+  const shouldDisable = !isOpen || appState.hasVoted || localStorage.getItem('audience-vote-submitted') === 'true';
   controls.forEach((el) => {
-    el.disabled = !isOpen;
+    el.disabled = shouldDisable;
   });
 }
 
@@ -193,6 +221,11 @@ voteForm.addEventListener('submit', async (event) => {
     return;
   }
 
+  if (appState.hasVoted || localStorage.getItem('audience-vote-submitted') === 'true') {
+    applyVotedUiState('投票済みです。再送信はできません。');
+    return;
+  }
+
   const selected = voteForm.querySelector('input[name="teamId"]:checked');
   if (!selected) {
     showMessage(voteMessage, '投票先のアプリを選択してください。', 'error');
@@ -203,33 +236,44 @@ voteForm.addEventListener('submit', async (event) => {
 
   try {
     if (isFirebaseConfigured()) {
-      const db = ensureFirebase();
-      const voteRef = db.ref('audienceApp/votes');
-      const snapshot = await voteRef.orderByChild('voterToken').equalTo(voterToken).once('value');
-      const existingVotes = snapshot.val() || {};
-      if (Object.keys(existingVotes).length > 0) {
-        showMessage(voteMessage, 'この端末ではすでに投票済みです。', 'error');
-        return;
+      const response = await fetch('/api/vote', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          teamId: selected.value,
+          voterToken
+        })
+      });
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        if (response.status === 409 || payload.error === 'already_voted') {
+          localStorage.setItem('audience-vote-submitted', 'true');
+          applyVotedUiState('この端末ではすでに投票済みです。');
+          return;
+        }
+        throw new Error(payload.error || '投票の受付に失敗しました。');
       }
 
-      const newVote = {
-        teamId: selected.value,
-        voterToken,
-        votedAt: Date.now()
-      };
-
-      await voteRef.push(newVote);
-    } else {
-      const votes = getLocalStorageData('votes', []);
-      if (votes.some((vote) => vote.voterToken === voterToken)) {
-        showMessage(voteMessage, 'この端末ではすでに投票済みです。', 'error');
-        return;
-      }
-      votes.push({ teamId: selected.value, voterToken, votedAt: Date.now() });
-      setLocalStorageData('votes', votes);
+      localStorage.setItem('audience-vote-submitted', 'true');
+      applyVotedUiState('✅ 送信完了');
+      voteForm.reset();
+      return;
     }
 
-    showMessage(voteMessage, '投票が完了しました。', 'success');
+    const votes = getLocalStorageData('votes', []);
+    if (votes.some((vote) => vote.voterToken === voterToken)) {
+      localStorage.setItem('audience-vote-submitted', 'true');
+      applyVotedUiState('この端末ではすでに投票済みです。');
+      return;
+    }
+    votes.push({ teamId: selected.value, voterToken, votedAt: Date.now() });
+    setLocalStorageData('votes', votes);
+    localStorage.setItem('audience-vote-submitted', 'true');
+    applyVotedUiState('✅ 送信完了');
     voteForm.reset();
   } catch (error) {
     console.error(error);
@@ -239,6 +283,11 @@ voteForm.addEventListener('submit', async (event) => {
 
 (async () => {
   try {
+    if (localStorage.getItem('audience-vote-submitted') === 'true') {
+      appState.hasVoted = true;
+      applyVotedUiState('投票済みです。再送信はできません。');
+    }
+
     if (isFirebaseConfigured()) {
       const db = ensureFirebase();
       await Promise.all([readSettings(db), readTeams(db), readVotes(db)]);
@@ -247,6 +296,8 @@ voteForm.addEventListener('submit', async (event) => {
       await readTeams(null);
       await readVotes(null);
     }
+
+    updateVoteStatus();
   } catch (error) {
     console.error(error);
     showMessage(voteMessage, error.message, 'error');
