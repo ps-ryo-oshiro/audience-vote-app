@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>管理者ダッシュボード</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="topbar">
+        <div class="brand">管理者モード</div>
+        <nav>
+          <a href="index.html">投票ページ</a>
+          <a href="admin.html">ダッシュボード</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container admin-shell">
+      <div class="page-header">
+        <h1>管理者ダッシュボード</h1>
+      </div>
+
+      <section id="login-panel" class="card auth-panel">
+        <h2>ログイン</h2>
+        <form id="admin-login-form">
+          <div class="form-row">
+            <label for="admin-id">ID</label>
+            <input id="admin-id" type="text" autocomplete="username" />
+          </div>
+          <div class="form-row">
+            <label for="admin-password">パスワード</label>
+            <input id="admin-password" type="password" autocomplete="current-password" />
+          </div>
+          <button type="submit" class="primary-button">ログイン</button>
+        </form>
+        <div id="login-message" class="message hidden" role="alert"></div>
+      </section>
+
+      <section id="dashboard-panel" class="card dashboard-panel hidden">
+        <div class="status-card">
+          <div>
+            <p style="margin:0 0 8px; color: var(--muted);">投票受付</p>
+            <button id="toggle-voting-status" class="secondary-button" type="button"></button>
+          </div>
+          <div>
+            <p style="margin:0; color: var(--muted);">優勝アプリ</p>
+            <strong id="winner-name">未判定</strong>
+          </div>
+        </div>
+
+        <div class="grid-two">
+          <div>
+            <h3>部門別集計</h3>
+            <div id="summary-table-wrap"></div>
+          </div>
+          <div>
+            <h3>全体集計</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>アプリ名</th>
+                  <th>部門</th>
+                  <th>得票数</th>
+                </tr>
+              </thead>
+              <tbody id="global-results-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="upload-panel" class="card upload-panel hidden">
+        <h2>アプリデータ登録</h2>
+        <form id="upload-form">
+          <div class="form-row">
+            <label for="upload-file">CSV / Excel ファイル</label>
+            <input id="upload-file" type="file" accept=".csv,.xlsx,.xls" />
+          </div>
+          <button type="submit" class="primary-button">取り込み</button>
+        </form>
+        <div id="upload-message" class="message hidden" role="status"></div>
+        <div id="upload-preview" style="margin-top: 18px;"></div>
+      </section>
+    </main>
+
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="admin.js"></script>
+  </body>
+</html>

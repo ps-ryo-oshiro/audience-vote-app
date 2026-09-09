@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>オーディエンス投票</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="topbar">
+        <div class="brand">オーディエンス投票</div>
+        <nav>
+          <a href="index.html">投票</a>
+          <a href="admin.html">管理者</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container">
+      <div class="page-header">
+        <h1>エントリーアプリ投票</h1>
+      </div>
+
+      <div class="card status-card">
+        <div>
+          <p style="margin:0 0 8px; color: var(--muted);">投票受付状況</p>
+          <span id="vote-status-badge" class="badge closed">停止中</span>
+        </div>
+        <div>
+          <p style="margin:0; color: var(--muted);">1人1票・単一選択</p>
+        </div>
+      </div>
+
+      <form id="vote-form">
+        <div id="section-list" class="section-list"></div>
+        <div style="margin-top: 24px;">
+          <button type="submit" class="primary-button" id="vote-submit">投票を送信</button>
+        </div>
+        <div id="vote-message" class="message hidden" role="status" aria-live="polite"></div>
+      </form>
+    </main>
+
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
