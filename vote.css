@@ -706,3 +706,88 @@ a:hover { color: var(--eyebrow); }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------- タブレット / PC（768px〜） ----------
+   スマホ（〜767px）は上記ルールのまま一切変えない。
+   背景・ヘッダー・部門バンドは全幅に広げ、中身だけ --content-w に収める。
+   --pad-x の % は各要素の親幅（= .shell の全幅）で解決される。 */
+
+@media (min-width: 768px) {
+  :root {
+    --content-w: 720px;
+    --pad-x: max(18px, calc((100% - var(--content-w)) / 2));
+    --cta-w: 480px;
+  }
+
+  .shell { max-width: none; }
+
+  .vote-header { padding: 16px var(--pad-x); }
+  .vote-header__brand { font-size: 15px; }
+
+  .hero { padding: 64px var(--pad-x) 56px; }
+  .hero__title { font-size: 64px; }
+  .hero__chip { font-size: 13px; padding: 9px 16px; }
+  .hero__streak--1 { top: 36px; width: 340px; height: 10px; }
+  .hero__streak--2 { top: 120px; width: 180px; height: 6px; }
+  .hero__streak--3 { bottom: 32px; width: 420px; height: 12px; }
+
+  .section-block { padding-top: 36px; }
+  .band { padding: 13px calc(var(--pad-x) + 6px); }
+  .band__name { font-size: 17px; }
+
+  .section-block__list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    padding: 0 var(--pad-x);
+  }
+
+  /* グリッド内で高さが揃うため、VIDEO 行をカード下端に寄せる */
+  .entry {
+    margin-bottom: 0;
+    justify-content: space-between;
+  }
+
+  .empty-box {
+    max-width: var(--content-w);
+    margin: 0 auto 12px;
+  }
+
+  /* 送信バーは全幅のフェード上に、CTA だけ中央 --cta-w で置く */
+  .submit-bar { padding: 18px var(--pad-x) 24px; }
+  .vote-message,
+  .submit-btn {
+    max-width: var(--cta-w);
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .vote-message { margin-bottom: 10px; }
+  .submit-btn { display: block; }
+  .submit-bar__loader {
+    left: max(18px, calc(50% - var(--cta-w) / 2));
+    right: max(18px, calc(50% - var(--cta-w) / 2));
+  }
+
+  /* 完了オーバーレイは画面全体を覆い、中身だけ中央に置く */
+  .done-overlay {
+    left: 0;
+    max-width: none;
+    transform: none;
+  }
+  .done-overlay__streak--1 { width: 360px; }
+  .done-overlay__streak--2 { width: 260px; }
+  .done-title { font-size: 68px; }
+  .done-lead { font-size: 16px; }
+  .done-card { min-width: 320px; }
+}
+
+@media (min-width: 1100px) {
+  :root { --content-w: 1080px; }
+
+  .hero { padding-top: 80px; padding-bottom: 64px; }
+  .hero__title { font-size: 76px; }
+
+  .section-block__list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  .done-title { font-size: 80px; }
+}
