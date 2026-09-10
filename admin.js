@@ -1,14 +1,17 @@
 const adminLoginForm = document.getElementById('admin-login-form');
 const loginPanel = document.getElementById('login-panel');
 const dashboardPanel = document.getElementById('dashboard-panel');
-const uploadPanel = document.getElementById('upload-panel');
 const loginMessage = document.getElementById('login-message');
-const uploadMessage = document.getElementById('upload-message');
 const winnerName = document.getElementById('winner-name');
 const toggleVotingStatus = document.getElementById('toggle-voting-status');
-const uploadForm = document.getElementById('upload-form');
 const summaryTableWrap = document.getElementById('summary-table-wrap');
 const globalResultsBody = document.getElementById('global-results-body');
+
+const participationPanel = document.getElementById('participation-panel');
+const participationCounter = document.getElementById('participation-counter');
+const participationMessage = document.getElementById('participation-message');
+const finalistListBody = document.getElementById('finalist-list-body');
+const candidateListBody = document.getElementById('candidate-list-body');
 
 const adminState = {
   loggedIn: false,
@@ -23,12 +26,12 @@ const SECTION_LABELS = {
 };
 
 const DEFAULT_TEAMS = [
-  { id: 'team-life-1', title: 'ライフサポートアプリ', section: 'life', videoUrl: 'https://example.com/video/life', participating: true },
-  { id: 'team-life-2', title: '健康管理アプリ', section: 'life', videoUrl: 'https://example.com/video/health', participating: true },
-  { id: 'team-work-1', title: '業務効率化ツール', section: 'work', videoUrl: 'https://example.com/video/work', participating: true },
-  { id: 'team-work-2', title: 'コミュニケーション支援', section: 'work', videoUrl: 'https://example.com/video/comm', participating: true },
-  { id: 'team-local-1', title: '地域活性化アプリ', section: 'local', videoUrl: 'https://example.com/video/local', participating: true },
-  { id: 'team-local-2', title: 'まちのおすすめ案内', section: 'local', videoUrl: 'https://example.com/video/local2', participating: true }
+  { id: 'entry-01', entryNo: 1, title: 'ライフサポートアプリ', section: 'life', videoUrl: 'https://example.com/video/entry-01', finalist: true, participating: true },
+  { id: 'entry-02', entryNo: 2, title: '健康管理アプリ', section: 'life', videoUrl: 'https://example.com/video/entry-02', finalist: false, participating: false },
+  { id: 'entry-03', entryNo: 3, title: '業務効率化ツール', section: 'work', videoUrl: 'https://example.com/video/entry-03', finalist: true, participating: true },
+  { id: 'entry-04', entryNo: 4, title: 'コミュニケーション支援', section: 'work', videoUrl: 'https://example.com/video/entry-04', finalist: false, participating: true },
+  { id: 'entry-05', entryNo: 5, title: '地域活性化アプリ', section: 'local', videoUrl: 'https://example.com/video/entry-05', finalist: true, participating: false },
+  { id: 'entry-06', entryNo: 6, title: 'まちのおすすめ案内', section: 'local', videoUrl: '', finalist: false, participating: false }
 ];
 
 function showMessage(el, text, type) {
@@ -64,45 +67,18 @@ function setLocalStorageData(key, value) {
   localStorage.setItem(`audienceApp:${key}`, JSON.stringify(value));
 }
 
-function makeTeamKey(section, title) {
-  return `${String(section).trim().toLowerCase()}::${String(title).trim().toLowerCase()}`;
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-function parseParticipatingFlag(value) {
-  if (value === undefined || value === null || String(value).trim() === '') {
-    return undefined;
-  }
-  return ['true', '1', 'on', 'yes'].includes(String(value).trim().toLowerCase());
-}
-
-function mergeTeams(existingTeams, rows) {
-  const result = existingTeams.map((team) => ({ ...team }));
-  const byKey = new Map(result.map((team) => [makeTeamKey(team.section, team.title), team]));
-
-  rows.forEach((row) => {
-    const key = makeTeamKey(row.section, row.title);
-    const existing = byKey.get(key);
-    if (existing) {
-      existing.title = row.title;
-      existing.section = row.section;
-      existing.videoUrl = row.video_url;
-      if (row.participating !== undefined) {
-        existing.participating = row.participating;
-      }
-    } else {
-      const created = {
-        id: crypto.randomUUID ? crypto.randomUUID() : `uploaded-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        title: row.title,
-        section: row.section,
-        videoUrl: row.video_url,
-        participating: row.participating !== undefined ? row.participating : false
-      };
-      result.push(created);
-      byKey.set(key, created);
-    }
-  });
-
-  return result;
+/* 表示判定。3か所で揃える判定規則。app.js・admin.js・worker.js で同じ内容にすること */
+function isVisibleTeam(team) {
+  return !!team && (team.finalist === true || team.participating === true);
 }
 
 function ensureFirebase() {
@@ -160,19 +136,66 @@ function renderGlobalResults(teams, votes) {
     const count = votes.filter((vote) => vote.teamId === team.id).length;
     return `<tr>
       <td>${team.title}</td><td>${team.section}</td><td>${count}</td>
-      <td><input type="checkbox" class="participating-toggle" data-team-id="${team.id}" ${team.participating ? 'checked' : ''} /></td>
     </tr>`;
   }).join('');
 
-  globalResultsBody.innerHTML = rows || '<tr><td colspan="4">データなし</td></tr>';
+  globalResultsBody.innerHTML = rows || '<tr><td colspan="3">データなし</td></tr>';
 }
 
-globalResultsBody.addEventListener('change', async (event) => {
+function byEntryNo(a, b) {
+  const aNo = typeof a.entryNo === 'number' ? a.entryNo : Infinity;
+  const bNo = typeof b.entryNo === 'number' ? b.entryNo : Infinity;
+  return aNo - bNo;
+}
+
+function computeFinalists(teams) {
+  return teams.filter((team) => team.finalist === true).slice().sort(byEntryNo);
+}
+
+function computeCandidates(teams) {
+  return teams.filter((team) => team.finalist !== true).slice().sort(byEntryNo);
+}
+
+function renderParticipationPanel(teams) {
+  const finalists = computeFinalists(teams);
+  const candidates = computeCandidates(teams);
+
+  finalistListBody.innerHTML = finalists.map((team) => {
+    const no = typeof team.entryNo === 'number' ? team.entryNo : '-';
+    return `<tr data-team-id="${escapeHtml(team.id)}">
+      <td>${no}</td>
+      <td>${escapeHtml(team.title)}</td>
+      <td>${escapeHtml(SECTION_LABELS[team.section] || team.section)}</td>
+      <td>本戦（常に表示）</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4">本戦チームがありません。</td></tr>';
+
+  candidateListBody.innerHTML = candidates.map((team) => {
+    const no = typeof team.entryNo === 'number' ? team.entryNo : '-';
+    return `<tr data-team-id="${escapeHtml(team.id)}">
+      <td>${no}</td>
+      <td>${escapeHtml(team.title)}</td>
+      <td>${escapeHtml(SECTION_LABELS[team.section] || team.section)}</td>
+      <td><input type="checkbox" class="participating-toggle" data-team-id="${escapeHtml(team.id)}" ${team.participating === true ? 'checked' : ''} /></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4">敗者復活候補がありません。</td></tr>';
+
+  updateParticipationCounter();
+}
+
+function updateParticipationCounter() {
+  const candidates = computeCandidates(adminState.teams);
+  const shown = candidates.filter((team) => isVisibleTeam(team)).length;
+  participationCounter.textContent = `${shown} / ${candidates.length}`;
+}
+
+candidateListBody.addEventListener('change', async (event) => {
   const el = event.target;
   if (!el.classList.contains('participating-toggle')) return;
 
   const teamId = el.dataset.teamId;
   const participating = el.checked;
+  hideMessage(participationMessage);
 
   try {
     if (isFirebaseConfigured()) {
@@ -186,9 +209,11 @@ globalResultsBody.addEventListener('change', async (event) => {
 
     const team = adminState.teams.find((t) => t.id === teamId);
     if (team) team.participating = participating;
+    updateParticipationCounter();
   } catch (error) {
     console.error(error);
     el.checked = !participating;
+    showMessage(participationMessage, `表示状態の更新に失敗しました: ${error.message}`, 'error');
   }
 });
 
@@ -230,6 +255,7 @@ async function fetchDashboardData() {
 
     renderSummaryTable(teams, votes);
     renderGlobalResults(teams, votes);
+    renderParticipationPanel(teams);
     determineWinner(teams, votes);
     updateVotingToggle();
     return;
@@ -243,6 +269,7 @@ async function fetchDashboardData() {
 
   renderSummaryTable(teams, votes);
   renderGlobalResults(teams, votes);
+  renderParticipationPanel(teams);
   determineWinner(teams, votes);
   updateVotingToggle();
 }
@@ -276,113 +303,9 @@ adminLoginForm.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (isFirebaseConfigured()) {
-    try {
-      ensureFirebase();
-      await firebase.auth().signInAnonymously();
-    } catch (error) {
-      console.error(error);
-      showMessage(loginMessage, '匿名認証が無効です。Firebase Consoleで有効化してください。', 'error');
-      return;
-    }
-  }
-
   adminState.loggedIn = true;
   loginPanel.classList.add('hidden');
   dashboardPanel.classList.remove('hidden');
-  uploadPanel.classList.remove('hidden');
+  participationPanel.classList.remove('hidden');
   await fetchDashboardData();
 });
-
-uploadForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  hideMessage(uploadMessage);
-
-  const fileInput = document.getElementById('upload-file');
-  const file = fileInput.files[0];
-  if (!file) {
-    showMessage(uploadMessage, 'CSV / Excel ファイルを選択してください。', 'error');
-    return;
-  }
-
-  try {
-    const data = await readUploadFile(file);
-    const validation = validateRows(data);
-    if (!validation.ok) {
-      showMessage(uploadMessage, validation.message, 'error');
-      return;
-    }
-
-    if (isFirebaseConfigured()) {
-      const db = ensureFirebase();
-      const snapshot = await db.ref('audienceApp/teams').once('value');
-      const existingTeams = Object.entries(snapshot.val() || {}).map(([id, team]) => ({ id, ...team }));
-      const merged = mergeTeams(existingTeams, validation.rows);
-
-      const updates = {};
-      merged.forEach((team) => {
-        updates[`audienceApp/teams/${team.id}`] = {
-          title: team.title,
-          section: team.section,
-          videoUrl: team.videoUrl,
-          participating: !!team.participating
-        };
-      });
-      await db.ref().update(updates);
-    } else {
-      const existingTeams = getLocalStorageData('teams', DEFAULT_TEAMS);
-      setLocalStorageData('teams', mergeTeams(existingTeams, validation.rows));
-    }
-
-    showMessage(uploadMessage, `${validation.rows.length}件のデータを取り込みました（新規登録・既存更新）。`, 'success');
-    await fetchDashboardData();
-  } catch (error) {
-    console.error(error);
-    showMessage(uploadMessage, `取り込みに失敗しました: ${error.message}`, 'error');
-  }
-});
-
-function readUploadFile(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const arrayBuffer = event.target.result;
-        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-        resolve(rows);
-      } catch (error) {
-        reject(error);
-      }
-    };
-    reader.onerror = () => reject(new Error('ファイルの読み込みに失敗しました。'));
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-function validateRows(rows) {
-  const required = ['section', 'title', 'video_url'];
-  const normalized = rows.map((row) => {
-    const fixed = {};
-    Object.keys(row).forEach((key) => {
-      fixed[String(key).trim()] = String(row[key]).trim();
-    });
-    return fixed;
-  });
-
-  const validRows = normalized
-    .filter((row) => required.every((field) => row[field]))
-    .map((row) => ({
-      section: row.section,
-      title: row.title,
-      video_url: row.video_url,
-      participating: parseParticipatingFlag(row.participating)
-    }));
-
-  if (!validRows.length) {
-    return { ok: false, message: 'CSV/Excel の列名は section, title, video_url を含む必要があります。', rows: [] };
-  }
-
-  return { ok: true, rows: validRows };
-}

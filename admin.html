@@ -63,7 +63,6 @@
                   <th>アプリ名</th>
                   <th>部門</th>
                   <th>得票数</th>
-                  <th>参加</th>
                 </tr>
               </thead>
               <tbody id="global-results-body"></tbody>
@@ -72,25 +71,47 @@
         </div>
       </section>
 
-      <section id="upload-panel" class="card upload-panel hidden">
-        <h2>アプリデータ登録</h2>
-        <form id="upload-form">
-          <div class="form-row">
-            <label for="upload-file">CSV / Excel ファイル</label>
-            <input id="upload-file" type="file" accept=".csv,.xlsx,.xls" />
+      <section id="participation-panel" class="card participation-panel hidden">
+        <h2>表示切替</h2>
+        <p class="helper-text">表示中の敗者復活チーム: <strong id="participation-counter">0 / 0</strong></p>
+        <div id="participation-message" class="message hidden" role="alert"></div>
+
+        <div class="grid-two">
+          <div>
+            <h3>本戦チーム</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>No</th>
+                  <th>アプリ名</th>
+                  <th>部門</th>
+                  <th>状態</th>
+                </tr>
+              </thead>
+              <tbody id="finalist-list-body"></tbody>
+            </table>
           </div>
-          <button type="submit" class="primary-button">取り込み</button>
-        </form>
-        <div id="upload-message" class="message hidden" role="status"></div>
-        <div id="upload-preview" style="margin-top: 18px;"></div>
+          <div>
+            <h3>敗者復活候補</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>No</th>
+                  <th>アプリ名</th>
+                  <th>部門</th>
+                  <th>表示</th>
+                </tr>
+              </thead>
+              <tbody id="candidate-list-body"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
     </main>
 
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <script src="firebase-config.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="admin.js"></script>
   </body>
 </html>
