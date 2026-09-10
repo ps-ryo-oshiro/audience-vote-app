@@ -45,7 +45,9 @@ audience-vote-app/
 ├── wrangler.jsonc       Cloudflare Workers設定
 ├── firebase-config.js  Firebase接続設定・デモ管理者ID/PW（要編集）
 ├── firebase.rules.json Firebase Realtime Databaseのセキュリティルール
-└── package.json
+├── package.json
+└── docs/
+    └── DEPLOY.md       デプロイ手順書（Cloudflare Workers）
 ```
 
 ## セットアップ
@@ -95,6 +97,10 @@ npx wrangler deploy
 ```
 
 `wrangler.jsonc`の設定に従い、Cloudflare Workersに静的アセット + `/api/vote`をまとめてデプロイする。
+
+初回セットアップ・アカウント引き継ぎ・本番公開前の必須設定・トラブルシュートは **[docs/DEPLOY.md](docs/DEPLOY.md)** を参照。
+
+> **注意**: 現在の公開URL（`https://audience-vote-app.ry-oshiro.workers.dev/`）は`firebase-config.js`が未設定のままデプロイされており、投票が集計されない状態。本番運用前に[docs/DEPLOY.md の「本番公開前の必須設定」](docs/DEPLOY.md#3-本番公開前の必須設定必読)を必ず実施すること。
 
 ## CSV/Excel取込フォーマット
 
