@@ -424,6 +424,8 @@ a:hover { color: var(--eyebrow); }
   letter-spacing: 0.18em;
   color: var(--yellow);
   opacity: 0;
+  /* VIDEOリンクが無いカードでも右寄せを保つ（entry__foot は space-between のまま） */
+  margin-left: auto;
 }
 
 .entry.is-selected .entry__mark { opacity: 1; }

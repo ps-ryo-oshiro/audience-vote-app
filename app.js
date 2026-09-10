@@ -12,12 +12,12 @@ const SECTIONS = [
 ];
 
 const DEFAULT_TEAMS = [
-  { id: 'team-life-1', title: 'ライフサポートアプリ', section: 'life', videoUrl: 'https://example.com/video/life', participating: true },
-  { id: 'team-life-2', title: '健康管理アプリ', section: 'life', videoUrl: 'https://example.com/video/health', participating: true },
-  { id: 'team-work-1', title: '業務効率化ツール', section: 'work', videoUrl: 'https://example.com/video/work', participating: true },
-  { id: 'team-work-2', title: 'コミュニケーション支援', section: 'work', videoUrl: 'https://example.com/video/comm', participating: true },
-  { id: 'team-local-1', title: '地域活性化アプリ', section: 'local', videoUrl: 'https://example.com/video/local', participating: true },
-  { id: 'team-local-2', title: 'まちのおすすめ案内', section: 'local', videoUrl: 'https://example.com/video/local2', participating: true }
+  { id: 'entry-01', entryNo: 1, title: 'ライフサポートアプリ', section: 'life', videoUrl: 'https://example.com/video/entry-01', finalist: true, participating: true },
+  { id: 'entry-02', entryNo: 2, title: '健康管理アプリ', section: 'life', videoUrl: 'https://example.com/video/entry-02', finalist: false, participating: false },
+  { id: 'entry-03', entryNo: 3, title: '業務効率化ツール', section: 'work', videoUrl: 'https://example.com/video/entry-03', finalist: true, participating: true },
+  { id: 'entry-04', entryNo: 4, title: 'コミュニケーション支援', section: 'work', videoUrl: 'https://example.com/video/entry-04', finalist: false, participating: true },
+  { id: 'entry-05', entryNo: 5, title: '地域活性化アプリ', section: 'local', videoUrl: 'https://example.com/video/entry-05', finalist: true, participating: false },
+  { id: 'entry-06', entryNo: 6, title: 'まちのおすすめ案内', section: 'local', videoUrl: '', finalist: false, participating: false }
 ];
 
 const THEME_KEY = 'audienceVote:theme';
@@ -28,7 +28,6 @@ const PHASE = { IDLE: 'idle', SENDING: 'sending' };
 const appState = {
   isOpen: true,
   teams: DEFAULT_TEAMS,
-  votes: [],
   hasVoted: false,
   selectedId: null,
   phase: PHASE.IDLE
@@ -143,9 +142,14 @@ async function readSettings(db) {
   updateVoteStatus();
 }
 
+/* 表示判定。3か所で揃える判定規則。app.js・admin.js・worker.js で同じ内容にすること */
+function isVisibleTeam(team) {
+  return !!team && (team.finalist === true || team.participating === true);
+}
+
 async function readTeams(db) {
   if (!isFirebaseConfigured()) {
-    appState.teams = getLocalStorageData('teams', DEFAULT_TEAMS).filter((team) => team.participating === true);
+    appState.teams = getLocalStorageData('teams', DEFAULT_TEAMS).filter(isVisibleTeam);
     renderTeams();
     return;
   }
@@ -153,18 +157,8 @@ async function readTeams(db) {
   const teams = snapshot.val() || {};
   appState.teams = Object.entries(teams)
     .map(([id, team]) => ({ id, ...team }))
-    .filter((team) => team.participating === true);
+    .filter(isVisibleTeam);
   renderTeams();
-}
-
-async function readVotes(db) {
-  if (!isFirebaseConfigured()) {
-    appState.votes = getLocalStorageData('votes', []);
-    return;
-  }
-  const snapshot = await db.ref('audienceApp/votes').once('value');
-  const votes = snapshot.val() || {};
-  appState.votes = Object.values(votes);
 }
 
 /* ---------------- 描画 ---------------- */
@@ -197,7 +191,14 @@ function renderTeams() {
   let index = 0;
 
   const html = SECTIONS.map((section) => {
-    const teams = appState.teams.filter((team) => team.section === section.key);
+    const teams = appState.teams
+      .filter((team) => team.section === section.key)
+      .slice()
+      .sort((a, b) => {
+        const aNo = typeof a.entryNo === 'number' ? a.entryNo : Infinity;
+        const bNo = typeof b.entryNo === 'number' ? b.entryNo : Infinity;
+        return aNo - bNo;
+      });
     const band = `
       <div class="band-clip">
         <div class="band">
@@ -213,16 +214,21 @@ function renderTeams() {
     const cards = teams.map((team) => {
       index += 1;
       const delay = (0.12 + index * 0.06).toFixed(2);
+      const displayTitle = typeof team.entryNo === 'number' ? `No.${team.entryNo} ${team.title}` : team.title;
+      const videoHref = safeVideoUrl(team.videoUrl);
+      const videoLink = videoHref !== '#'
+        ? `<a class="entry__video" href="${escapeHtml(videoHref)}" target="_blank" rel="noopener noreferrer">VIDEO</a>`
+        : '';
       return `
         <label class="entry" data-team-id="${escapeHtml(team.id)}" style="animation-delay:${delay}s">
           <span class="entry__shard" aria-hidden="true"></span>
           <span class="entry__head">
-            <span class="entry__title">${escapeHtml(team.title)}</span>
+            <span class="entry__title">${escapeHtml(displayTitle)}</span>
             <input class="entry__radio" type="radio" name="teamId" value="${escapeHtml(team.id)}" />
             <span class="entry__box" aria-hidden="true"></span>
           </span>
           <span class="entry__foot">
-            <a class="entry__video" href="${escapeHtml(safeVideoUrl(team.videoUrl))}" target="_blank" rel="noopener noreferrer">VIDEO</a>
+            ${videoLink}
             <span class="entry__mark" aria-hidden="true">SELECTED</span>
           </span>
         </label>`;
@@ -425,11 +431,12 @@ initTheme();
 
     if (isFirebaseConfigured()) {
       const db = ensureFirebase();
-      await Promise.all([readSettings(db), readTeams(db), readVotes(db)]);
+      await Promise.all([readSettings(db), readTeams(db)]);
+      /* 表示に必要なデータ（チーム一覧・受付状態）を読み終えたら、常時接続を持ち続けない（要件13.1） */
+      db.goOffline();
     } else {
       await readSettings(null);
       await readTeams(null);
-      await readVotes(null);
     }
 
     updateVoteStatus();
@@ -439,6 +446,6 @@ initTheme();
     }
   } catch (error) {
     console.error(error);
-    showMessage(error.message, 'error');
+    showMessage(`読み込みに失敗しました。ページを再読み込みしてください。（${error.message}）`, 'error');
   }
 })();
