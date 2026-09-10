@@ -16,8 +16,8 @@
  *
  * サブコマンド:
  *   seed     --judge <file> --finalists <No,No,...> [--current <file>]
- *   videos   （タスク2.2で実装予定・未実装）
- *   rename   （タスク2.2で実装予定・未実装）
+ *   videos   --file <csv> --current <file>
+ *   rename   --no <No> --title <新しい名称> --current <file>
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -74,6 +74,43 @@ function readJsonFile(path, { allowMissing = false } = {}) {
     fail(`JSONの解析に失敗しました (${path}): ${err.message}`);
   }
   return null; // unreachable (fail exits the process)
+}
+
+/**
+ * テキストファイルを読み込む（CSVなど、JSONでないファイル用）。
+ */
+function readTextFile(path) {
+  if (!existsSync(path)) {
+    fail(`ファイルが見つかりません: ${path}`);
+  }
+  const raw = readFileSync(path, 'utf8');
+  if (raw.trim() === '') {
+    fail(`ファイルが空です: ${path}`);
+  }
+  return raw;
+}
+
+/**
+ * `--current` のJSONを、チームIDをキーにしたオブジェクトへ正規化する。
+ * 未指定・ファイル不存在・中身が null のいずれも「空のDB」として扱う。
+ */
+function normalizeCurrent(path) {
+  const currentData = readJsonFile(path, { allowMissing: true });
+  if (currentData && typeof currentData === 'object' && !Array.isArray(currentData)) {
+    return currentData;
+  }
+  return {};
+}
+
+/**
+ * シンプルなCSVパーサー（引用符・エスケープには対応しない）。
+ * 空行は無視し、各行をカンマ区切りでセルの配列にし、前後の空白を除く。
+ */
+function parseCsvLines(text) {
+  return text
+    .split(/\r\n|\r|\n/)
+    .filter((line) => line.trim() !== '')
+    .map((line) => line.split(',').map((cell) => cell.trim()));
 }
 
 /**
@@ -227,10 +264,158 @@ function runSeed(argv) {
   process.stdout.write(`${JSON.stringify(patch, null, 2)}\n`);
 }
 
-function notImplemented(subcommand) {
-  fail(
-    `"${subcommand}" サブコマンドは未実装です（タスク2.2で実装予定です）。今回は "seed" のみ利用できます。`
-  );
+/**
+ * videos サブコマンド:
+ * エントリーNoまたはアプリ名と紹介動画URLの一覧（CSV）から、一致するチームの
+ * `videoUrl` だけの multi-path パッチを生成する。
+ */
+function runVideos(argv) {
+  let values;
+  try {
+    ({ values } = parseArgs({
+      args: argv,
+      options: {
+        file: { type: 'string' },
+        current: { type: 'string' },
+      },
+      allowPositionals: false,
+      strict: true,
+    }));
+  } catch (err) {
+    fail(`引数の解析に失敗しました: ${err.message}`);
+  }
+
+  if (!values.file) {
+    fail('videos には --file <csv> が必要です');
+  }
+  if (!values.current) {
+    fail('videos には --current <file> が必要です');
+  }
+
+  const current = normalizeCurrent(values.current);
+
+  const csvText = readTextFile(values.file);
+  const rows = parseCsvLines(csvText);
+  if (rows.length === 0) {
+    fail(`--file にデータ行がありません: ${values.file}`);
+  }
+
+  const header = rows[0].map((h) => h.toLowerCase());
+  const dataRows = rows.slice(1);
+
+  const noIdx = header.indexOf('no');
+  const titleIdx = header.indexOf('title');
+  const urlIdx = header.indexOf('url');
+
+  if (urlIdx === -1 || (noIdx === -1 && titleIdx === -1)) {
+    fail(
+      `--file の見出しが不正です（"no,url" または "title,url" を期待）: ${header.join(',')}`
+    );
+  }
+
+  // title での照合用: title(前後の空白を除いたもの) -> id のマップ
+  const titleToId = new Map();
+  for (const [id, team] of Object.entries(current)) {
+    if (team && typeof team === 'object' && typeof team.title === 'string') {
+      titleToId.set(team.title.trim(), id);
+    }
+  }
+
+  const patch = {};
+  const rejected = [];
+
+  dataRows.forEach((cols, index) => {
+    const lineNo = index + 2; // 1行目は見出し
+    const url = cols[urlIdx] ?? '';
+    let id = null;
+    let key;
+
+    if (noIdx !== -1) {
+      const noRaw = (cols[noIdx] ?? '').trim();
+      key = `no=${noRaw}`;
+      const no = Number(noRaw);
+      if (noRaw !== '' && Number.isInteger(no)) {
+        const candidateId = teamIdFromNo(no);
+        if (current[candidateId] && typeof current[candidateId] === 'object') {
+          id = candidateId;
+        }
+      }
+    } else {
+      const titleRaw = (cols[titleIdx] ?? '').trim();
+      key = `title=${titleRaw}`;
+      if (titleToId.has(titleRaw)) {
+        id = titleToId.get(titleRaw);
+      }
+    }
+
+    if (!id) {
+      rejected.push(`${lineNo}行目: 一致するチームが見つかりません (${key}, url=${url})`);
+      return;
+    }
+    if (!/^https?:\/\//.test(url)) {
+      rejected.push(`${lineNo}行目: URLの形式が不正です (${id}, url=${url})`);
+      return;
+    }
+
+    patch[`${id}/videoUrl`] = url;
+  });
+
+  if (rejected.length > 0) {
+    logWarn('反映しなかった行があります:');
+    for (const line of rejected) {
+      process.stderr.write(`  - ${line}\n`);
+    }
+  }
+
+  process.stdout.write(`${JSON.stringify(patch, null, 2)}\n`);
+}
+
+/**
+ * rename サブコマンド:
+ * 指定したエントリーNoのチームについて、`title` だけの multi-path パッチを生成する。
+ */
+function runRename(argv) {
+  let values;
+  try {
+    ({ values } = parseArgs({
+      args: argv,
+      options: {
+        no: { type: 'string' },
+        title: { type: 'string' },
+        current: { type: 'string' },
+      },
+      allowPositionals: false,
+      strict: true,
+    }));
+  } catch (err) {
+    fail(`引数の解析に失敗しました: ${err.message}`);
+  }
+
+  if (!values.no) {
+    fail('rename には --no <エントリーNo> が必要です');
+  }
+  if (values.title === undefined || values.title.trim() === '') {
+    fail('rename には --title <新しい名称> が必要です');
+  }
+  if (!values.current) {
+    fail('rename には --current <file> が必要です');
+  }
+
+  const no = Number(values.no);
+  if (!Number.isInteger(no)) {
+    fail(`--no には整数を指定してください: "${values.no}"`);
+  }
+
+  const current = normalizeCurrent(values.current);
+
+  const id = teamIdFromNo(no);
+  const existing = current[id];
+  if (!existing || typeof existing !== 'object') {
+    fail(`--current に該当するチームが見つかりません: ${id} (No ${no})`);
+  }
+
+  const patch = { [`${id}/title`]: values.title };
+  process.stdout.write(`${JSON.stringify(patch, null, 2)}\n`);
 }
 
 function usage() {
@@ -245,8 +430,10 @@ function main() {
       runSeed(rest);
       break;
     case 'videos':
+      runVideos(rest);
+      break;
     case 'rename':
-      notImplemented(subcommand);
+      runRename(rest);
       break;
     case undefined:
       fail(`サブコマンドを指定してください。${usage()}`);
