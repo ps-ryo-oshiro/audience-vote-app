@@ -1,8 +1,8 @@
 /* =========================================================
    オーディエンス投票 — 投票画面ロジック
-   データ層（Firebase / localStorage フォールバック / voterToken /
-   /api/vote 二重投票判定）は従来の app.js の実装を踏襲。
-   UI層のみ新デザイン（テーマ切替・送信アニメーション）に差し替え。
+   データ層: Firebase / localStorage フォールバック・voterToken・
+   /api/vote への二重投票判定を担う。
+   UI層: テーマ切替・送信アニメーション・完了オーバーレイを担う。
    ========================================================= */
 
 const SECTIONS = [
@@ -21,7 +21,9 @@ const DEFAULT_TEAMS = [
 ];
 
 const THEME_KEY = 'audienceVote:theme';
+const VOTE_SUBMITTED_KEY = 'audience-vote-submitted';
 const SENDING_MS = 1200;
+const PHASE = { IDLE: 'idle', SENDING: 'sending' };
 
 const appState = {
   isOpen: true,
@@ -29,7 +31,7 @@ const appState = {
   votes: [],
   hasVoted: false,
   selectedId: null,
-  phase: 'idle' /* idle | sending | done */
+  phase: PHASE.IDLE
 };
 
 const voteForm = document.getElementById('vote-form');
@@ -81,7 +83,7 @@ function hideMessage() {
   voteMessage.className = 'vote-message hidden';
 }
 
-/* ---------------- データ層（従来実装を踏襲） ---------------- */
+/* ---------------- データ層 ---------------- */
 
 function isFirebaseConfigured() {
   const config = window.firebaseConfig || {};
@@ -188,7 +190,7 @@ function safeVideoUrl(value) {
 }
 
 function isLocked() {
-  return !appState.isOpen || appState.hasVoted || appState.phase !== 'idle';
+  return !appState.isOpen || appState.hasVoted || appState.phase !== PHASE.IDLE;
 }
 
 function renderTeams() {
@@ -234,8 +236,16 @@ function renderTeams() {
   updateVoteStatus();
 }
 
+function submitLabelHtml(sending) {
+  if (sending) return '<span class="submit-btn__spinner" aria-hidden="true"></span>送信中';
+  if (appState.hasVoted) return '送信完了';
+  if (!appState.isOpen) return '受付は終了しました';
+  return appState.selectedId ? '投票を送信する' : 'アプリを選択してください';
+}
+
 function updateVoteStatus() {
   const locked = isLocked();
+  const sending = appState.phase === PHASE.SENDING;
 
   if (voteStatusBadge) {
     voteStatusBadge.className = `status-pill${appState.isOpen ? '' : ' is-closed'}`;
@@ -253,12 +263,10 @@ function updateVoteStatus() {
     }
   });
 
-  const sending = appState.phase === 'sending';
+  setLoaderVisible(sending);
   voteSubmit.classList.toggle('is-sending', sending);
   voteSubmit.disabled = locked || !appState.selectedId;
-  voteSubmitLabel.innerHTML = sending
-    ? '<span class="submit-btn__spinner" aria-hidden="true"></span>送信中'
-    : (appState.hasVoted ? '送信完了' : (!appState.isOpen ? '受付は終了しました' : (appState.selectedId ? '投票を送信する' : 'アプリを選択してください')));
+  voteSubmitLabel.innerHTML = submitLabelHtml(sending);
 }
 
 function setLoaderVisible(visible) {
@@ -307,16 +315,11 @@ function showDoneOverlay(title) {
   document.body.appendChild(overlay);
 }
 
-/* 送信成功時の演出。ローディング → 完了オーバーレイ */
+/* 送信成功時の演出。呼び出し側で phase = SENDING にした後に呼ぶ。ローディング → 完了オーバーレイ */
 function playDoneSequence(title) {
-  appState.phase = 'sending';
-  setLoaderVisible(true);
-  updateVoteStatus();
-
   setTimeout(() => {
-    appState.phase = 'done';
+    appState.phase = PHASE.IDLE;
     appState.hasVoted = true;
-    setLoaderVisible(false);
     updateVoteStatus();
     showDoneOverlay(title);
   }, SENDING_MS);
@@ -324,23 +327,15 @@ function playDoneSequence(title) {
 
 function applyVotedUiState(messageText) {
   appState.hasVoted = true;
-  appState.phase = 'idle';
-  setLoaderVisible(false);
+  appState.phase = PHASE.IDLE;
   updateVoteStatus();
   showMessage(messageText || '投票済みです。再送信はできません。', 'success');
 }
 
 /* ---------------- イベント ---------------- */
 
-sectionList.addEventListener('click', (event) => {
-  const entry = event.target.closest('.entry');
-  if (!entry || isLocked()) return;
-  if (event.target.closest('a')) return; /* 動画リンクは選択扱いにしない */
-  appState.selectedId = entry.dataset.teamId;
-  hideMessage();
-  updateVoteStatus();
-});
-
+/* ラベルクリックは change に転送される（動画リンクなど内部の対話的要素への
+   クリックは転送されない）ため、change だけで選択を拾えば十分 */
 sectionList.addEventListener('change', (event) => {
   if (event.target.name !== 'teamId' || isLocked()) return;
   appState.selectedId = event.target.value;
@@ -357,9 +352,9 @@ voteForm.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (appState.phase !== 'idle') return;
+  if (appState.phase !== PHASE.IDLE) return;
 
-  if (appState.hasVoted || localStorage.getItem('audience-vote-submitted') === 'true') {
+  if (appState.hasVoted || localStorage.getItem(VOTE_SUBMITTED_KEY) === 'true') {
     applyVotedUiState('投票済みです。再送信はできません。');
     return;
   }
@@ -373,8 +368,7 @@ voteForm.addEventListener('submit', async (event) => {
   const team = appState.teams.find((item) => item.id === teamId) || {};
   const voterToken = getVoterToken();
 
-  appState.phase = 'sending';
-  setLoaderVisible(true);
+  appState.phase = PHASE.SENDING;
   updateVoteStatus();
 
   try {
@@ -389,32 +383,31 @@ voteForm.addEventListener('submit', async (event) => {
 
       if (!response.ok) {
         if (response.status === 409 || payload.error === 'already_voted') {
-          localStorage.setItem('audience-vote-submitted', 'true');
+          localStorage.setItem(VOTE_SUBMITTED_KEY, 'true');
           applyVotedUiState('この端末ではすでに投票済みです。');
           return;
         }
         throw new Error(payload.error || '投票の受付に失敗しました。');
       }
 
-      localStorage.setItem('audience-vote-submitted', 'true');
+      localStorage.setItem(VOTE_SUBMITTED_KEY, 'true');
       playDoneSequence(team.title || '');
       return;
     }
 
     const votes = getLocalStorageData('votes', []);
     if (votes.some((vote) => vote.voterToken === voterToken)) {
-      localStorage.setItem('audience-vote-submitted', 'true');
+      localStorage.setItem(VOTE_SUBMITTED_KEY, 'true');
       applyVotedUiState('この端末ではすでに投票済みです。');
       return;
     }
     votes.push({ teamId, voterToken, votedAt: Date.now() });
     setLocalStorageData('votes', votes);
-    localStorage.setItem('audience-vote-submitted', 'true');
+    localStorage.setItem(VOTE_SUBMITTED_KEY, 'true');
     playDoneSequence(team.title || '');
   } catch (error) {
     console.error(error);
-    appState.phase = 'idle';
-    setLoaderVisible(false);
+    appState.phase = PHASE.IDLE;
     updateVoteStatus();
     showMessage(`投票に失敗しました: ${error.message}`, 'error');
   }
@@ -426,7 +419,7 @@ initTheme();
 
 (async () => {
   try {
-    if (localStorage.getItem('audience-vote-submitted') === 'true') {
+    if (localStorage.getItem(VOTE_SUBMITTED_KEY) === 'true') {
       appState.hasVoted = true;
     }
 
