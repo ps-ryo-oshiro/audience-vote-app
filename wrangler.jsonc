@@ -6,5 +6,8 @@
   "assets": {
     "directory": "./",
     "not_found_handling": "single-page-application"
-  }
+  },
+  "kv_namespaces": [
+    { "binding": "AUDIENCE_VOTES", "id": "local-dev-placeholder" }
+  ]
 }
