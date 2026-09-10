@@ -3,17 +3,14 @@
     ".read": false,
     ".write": false,
     "audienceApp": {
-      "teams": {
-        ".read": true,
-        ".write": true
-      },
+      "teams":    { ".read": true, ".write": true },
+      "settings": { ".read": true, ".write": true },
       "votes": {
-        ".read": "auth != null",
-        ".write": true
-      },
-      "settings": {
         ".read": true,
-        ".write": true
+        "$voteId": {
+          ".write": "!data.exists() && newData.exists()",
+          ".validate": "newData.hasChildren(['teamId', 'voterToken', 'votedAt'])"
+        }
       }
     }
   }
