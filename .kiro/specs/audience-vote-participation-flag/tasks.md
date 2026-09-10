@@ -37,7 +37,7 @@
   - 完了状態: Worker をローカルで起動すると、KV binding と DB URL の変数が有効になっていることが起動ログで確認できる
   - _Requirements: 7.2, 11.4_
 
-- [ ] 1.4 配信するファイルを許可リストで絞り、SPA の設定を外す
+- [x] 1.4 配信するファイルを許可リストで絞り、SPA の設定を外す
   - 画面に必要な7ファイル（投票画面・管理画面の HTML と JS、2つのスタイル、接続設定）だけを配信対象にする
   - 存在しないパスに `index.html` を返す SPA の設定を外す
   - 完了状態: ローカル起動した Worker で、`/`・`/index.html`・`/admin.html`・`/vote.css`・`/style.css` が200になり、README・Worker本体・Worker設定・ルール・docs・scripts・spec が404になる
@@ -158,3 +158,6 @@
   - _Requirements: 4.5, 8.3, 9.1, 10.2, 10.4, 11.3, 13.1, 13.2_
   - _Depends: 4.2, 4.3, 5.1, 5.2_
   - _Blocked: 4.3・5.1・5.2 の完了待ち_
+
+## Implementation Notes
+- タスク1.4: `not_found_handling: "single-page-application"` を外す前の時点でも、`wrangler dev` では存在しないパスが既に404を返していた（design.mdの「SPA設定ありだとindex.htmlが200で返る」という前提の記述と食い違う）。`worker.js` が `env.ASSETS.fetch()` にフォールバックしており、ローカルの `wrangler dev` ではアセット未マッチ時にプラットフォームのSPAフォールバックが作動していなかった可能性がある。設定削除自体はdesign.mdの明示的な指示（クライアント側ルーティングを使わない）どおりで正しく、変更後の完了条件（配信対象200・非対象404）は満たされている。本番Cloudflare環境での挙動もタスク5.3の実機確認で併せて確認すること。
