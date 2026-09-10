@@ -1,41 +1,54 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>オーディエンス投票</title>
-    <link rel="stylesheet" href="style.css" />
+    <meta name="theme-color" content="#ffffff" id="meta-theme-color" />
+    <title>オーディエンス投票 | AI爆速アプリコンテスト</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="vote.css" />
   </head>
   <body>
-    <header>
-      <div class="topbar">
-        <div class="brand">🎉 オーディエンス投票</div>
-      </div>
-    </header>
-
-    <main class="container">
-      <div class="page-header">
-        <h1>✨ エントリーアプリ投票</h1>
-      </div>
-
-      <div class="card status-card">
-        <div>
-          <p style="margin:0 0 8px; color: var(--muted);">投票受付状況</p>
-          <span id="vote-status-badge" class="badge closed">停止中</span>
+    <div class="shell">
+      <header class="vote-header">
+        <span class="vote-header__brand">AI爆速アプリコンテスト</span>
+        <div class="vote-header__right">
+          <div class="theme-toggle" role="group" aria-label="表示テーマ">
+            <button type="button" class="theme-toggle__btn is-active" data-theme-set="light" aria-pressed="true">LIGHT</button>
+            <button type="button" class="theme-toggle__btn" data-theme-set="dark" aria-pressed="false">DARK</button>
+          </div>
+          <span class="status-pill" id="vote-status-badge"><i class="status-pill__dot"></i>受付確認中</span>
         </div>
-        <div>
-          <p style="margin:0; color: var(--muted);">1人1票・単一選択</p>
+      </header>
+
+      <section class="hero">
+        <span class="hero__streak hero__streak--1"></span>
+        <span class="hero__streak hero__streak--2"></span>
+        <span class="hero__streak hero__streak--3"></span>
+        <div class="hero__inner">
+          <p class="hero__eyebrow">AUDIENCE VOTE</p>
+          <h1 class="hero__title">推しアプリを<br /><span class="hero__accent">1本</span>選べ。</h1>
+          <div class="hero__chips">
+            <span class="hero__chip hero__chip--1">1人1票</span>
+            <span class="hero__chip hero__chip--2" id="entry-count">全0エントリー</span>
+          </div>
         </div>
-      </div>
+      </section>
 
       <form id="vote-form">
-        <div id="section-list" class="section-list"></div>
-        <div style="margin-top: 24px;">
-          <button type="submit" class="primary-button" id="vote-submit">投票を送信</button>
+        <div id="section-list"></div>
+
+        <div class="submit-bar">
+          <p class="vote-message hidden" id="vote-message" role="status" aria-live="polite"></p>
+          <button type="submit" class="submit-btn" id="vote-submit" disabled>
+            <span class="submit-btn__label" id="vote-submit-label">アプリを選択してください</span>
+            <span class="submit-btn__shimmer" aria-hidden="true"></span>
+          </button>
         </div>
-        <div id="vote-message" class="message hidden" role="status" aria-live="polite"></div>
       </form>
-    </main>
+    </div>
 
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>

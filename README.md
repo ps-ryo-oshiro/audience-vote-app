@@ -6,7 +6,7 @@
 
 ## 機能
 
-- **投票画面**（`index.html`）: 部門別（ライフ / ワーク / ローカル）にエントリーアプリを表示し、1人1票のラジオ選択で投票
+- **投票画面**（`index.html`）: 部門別（ライフ / ワーク / ローカル）にエントリーアプリを表示し、1人1票のカード選択で投票。ライト/ダークのテーマ切替と、送信後の投票完了演出に対応
 - **管理画面**（`admin.html`）: ログイン後に投票受付のON/OFF切替、部門別・全体の得票集計、優勝アプリの表示
 - **エントリー登録**: 管理画面からCSV/Excelファイルをアップロードしてエントリーアプリを一括登録
 - **二重投票防止**: 端末ごとに発行するvoterトークンで、同一端末からの再投票をブロック
@@ -15,8 +15,8 @@
 
 ```
 [ブラウザ]
-  index.html / app.js   … 投票画面
-  admin.html / admin.js … 管理画面（ログイン・集計・CSV取込）
+  index.html / app.js / vote.css … 投票画面
+  admin.html / admin.js / style.css … 管理画面（ログイン・集計・CSV取込）
         │
         ├─ Firebase Realtime Database（設定済みの場合）
         │    audienceApp/teams    … エントリーアプリ一覧
@@ -38,9 +38,10 @@
 audience-vote-app/
 ├── index.html          投票画面
 ├── app.js              投票画面のロジック
+├── vote.css            投票画面のスタイル（ライト/ダーク・アニメーション）
 ├── admin.html          管理画面
 ├── admin.js            管理画面のロジック（ログイン・集計・CSV取込）
-├── style.css           共通スタイル
+├── style.css           管理画面のスタイル
 ├── worker.js           Cloudflare Workers本体（/api/vote）
 ├── wrangler.jsonc       Cloudflare Workers設定
 ├── firebase-config.js  Firebase接続設定・デモ管理者ID/PW（要編集）
