@@ -176,6 +176,17 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+/* javascript: 等のスキームを弾き、http/https のURLだけを許可する */
+function safeVideoUrl(value) {
+  if (!value) return '#';
+  try {
+    const url = new URL(String(value), window.location.href);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : '#';
+  } catch (error) {
+    return '#';
+  }
+}
+
 function isLocked() {
   return !appState.isOpen || appState.hasVoted || appState.phase !== 'idle';
 }
@@ -209,7 +220,7 @@ function renderTeams() {
             <span class="entry__box" aria-hidden="true"></span>
           </span>
           <span class="entry__foot">
-            <a class="entry__video" href="${escapeHtml(team.videoUrl || '#')}" target="_blank" rel="noopener noreferrer">VIDEO</a>
+            <a class="entry__video" href="${escapeHtml(safeVideoUrl(team.videoUrl))}" target="_blank" rel="noopener noreferrer">VIDEO</a>
             <span class="entry__mark" aria-hidden="true">SELECTED</span>
           </span>
         </label>`;
