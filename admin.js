@@ -6,6 +6,8 @@ const winnerName = document.getElementById('winner-name');
 const toggleVotingStatus = document.getElementById('toggle-voting-status');
 const summaryTableWrap = document.getElementById('summary-table-wrap');
 const globalResultsBody = document.getElementById('global-results-body');
+const totalVotesCount = document.getElementById('total-votes-count');
+const excludedVotesNote = document.getElementById('excluded-votes-note');
 
 const participationPanel = document.getElementById('participation-panel');
 const participationCounter = document.getElementById('participation-counter');
@@ -16,7 +18,12 @@ const candidateListBody = document.getElementById('candidate-list-body');
 const adminState = {
   loggedIn: false,
   teams: [],
-  isOpen: true
+  votes: [],
+  isOpen: true,
+  subscribed: false,
+  // 表示切替パネルを直前に組み立てたときの「顔ぶれ・名称・並び」の署名。
+  // teams が変わっても、この署名が同じなら表示切替パネルは組み直さない（3.3）
+  participationSignature: null
 };
 
 const SECTION_LABELS = {
@@ -102,27 +109,77 @@ function getDemoAdmin() {
   return window.audienceDemoAdmin || { username: 'admin', password: 'admin123' };
 }
 
+function byEntryNo(a, b) {
+  const aNo = typeof a.entryNo === 'number' ? a.entryNo : Infinity;
+  const bNo = typeof b.entryNo === 'number' ? b.entryNo : Infinity;
+  return aNo - bNo;
+}
+
+/* 得票数の多い順、同数はNo順（5.1・5.5） */
+function sortByCountThenNo(a, b) {
+  if (b.count !== a.count) return b.count - a.count;
+  return byEntryNo(a, b);
+}
+
+/* 同数は同順位とし、次の順位は飛ばす（1位, 1位, 3位）（5.5） */
+function assignRanks(sortedItems) {
+  let rank = 0;
+  let lastCount = null;
+  return sortedItems.map((item, index) => {
+    if (lastCount === null || item.count !== lastCount) {
+      rank = index + 1;
+      lastCount = item.count;
+    }
+    return { ...item, rank };
+  });
+}
+
+/* どのチームにも一致しない teamId の票は、チームの得票には数えず「集計対象外」として件数だけ示す */
+function computeVoteCounts(teams, votes) {
+  const countsById = new Map();
+  teams.forEach((team) => countsById.set(team.id, 0));
+
+  let excludedCount = 0;
+  votes.forEach((vote) => {
+    if (countsById.has(vote.teamId)) {
+      countsById.set(vote.teamId, countsById.get(vote.teamId) + 1);
+    } else {
+      excludedCount += 1;
+    }
+  });
+
+  return { countsById, excludedCount, totalVotes: votes.length };
+}
+
 function renderSummaryTable(teams, votes) {
+  const { countsById } = computeVoteCounts(teams, votes);
   const sectionGroups = { life: [], work: [], local: [] };
+
   teams.forEach((team) => {
     if (sectionGroups[team.section]) {
-      sectionGroups[team.section].push(team);
+      sectionGroups[team.section].push({
+        id: team.id,
+        entryNo: team.entryNo,
+        title: team.title,
+        count: countsById.get(team.id) || 0
+      });
     }
   });
 
   const sectionRows = Object.entries(sectionGroups)
     .map(([section, list]) => {
-      const rows = list.map((team) => {
-        const count = votes.filter((vote) => vote.teamId === team.id).length;
-        return `<tr><td>${team.title}</td><td>${count}</td></tr>`;
+      const sorted = list.slice().sort(sortByCountThenNo);
+      const rows = sorted.map((item) => {
+        const no = typeof item.entryNo === 'number' ? item.entryNo : '-';
+        return `<tr><td>${no}</td><td>${escapeHtml(item.title)}</td><td>${item.count}</td></tr>`;
       }).join('');
 
       return `
         <div style="margin-bottom: 24px;">
-          <h4>${SECTION_LABELS ? SECTION_LABELS[section] || section : section}</h4>
+          <h4>${SECTION_LABELS[section] || section}</h4>
           <table>
-            <thead><tr><th>アプリ名</th><th>得票数</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="2">データなし</td></tr>'}</tbody>
+            <thead><tr><th>No</th><th>アプリ名</th><th>得票数</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="3">データなし</td></tr>'}</tbody>
           </table>
         </div>
       `;
@@ -132,20 +189,99 @@ function renderSummaryTable(teams, votes) {
 }
 
 function renderGlobalResults(teams, votes) {
-  const rows = teams.map((team) => {
-    const count = votes.filter((vote) => vote.teamId === team.id).length;
+  const { countsById, excludedCount, totalVotes } = computeVoteCounts(teams, votes);
+
+  const ranked = assignRanks(
+    teams
+      .map((team) => ({
+        id: team.id,
+        entryNo: team.entryNo,
+        title: team.title,
+        section: team.section,
+        count: countsById.get(team.id) || 0
+      }))
+      .sort(sortByCountThenNo)
+  );
+
+  const rows = ranked.map((item) => {
+    const no = typeof item.entryNo === 'number' ? item.entryNo : '-';
     return `<tr>
-      <td>${team.title}</td><td>${team.section}</td><td>${count}</td>
+      <td>${item.rank}</td>
+      <td>${no}</td>
+      <td>${escapeHtml(item.title)}</td>
+      <td>${escapeHtml(SECTION_LABELS[item.section] || item.section)}</td>
+      <td>${item.count}</td>
     </tr>`;
   }).join('');
 
-  globalResultsBody.innerHTML = rows || '<tr><td colspan="3">データなし</td></tr>';
+  globalResultsBody.innerHTML = rows || '<tr><td colspan="5">データなし</td></tr>';
+
+  if (totalVotesCount) {
+    totalVotesCount.textContent = String(totalVotes);
+  }
+
+  if (excludedVotesNote) {
+    if (excludedCount > 0) {
+      excludedVotesNote.textContent = `（集計対象外 ${excludedCount}件）`;
+      excludedVotesNote.classList.remove('hidden');
+    } else {
+      excludedVotesNote.textContent = '';
+      excludedVotesNote.classList.add('hidden');
+    }
+  }
 }
 
-function byEntryNo(a, b) {
-  const aNo = typeof a.entryNo === 'number' ? a.entryNo : Infinity;
-  const bNo = typeof b.entryNo === 'number' ? b.entryNo : Infinity;
-  return aNo - bNo;
+function determineWinner(teams, votes) {
+  if (!teams.length) {
+    winnerName.textContent = '未判定';
+    return;
+  }
+
+  const { countsById } = computeVoteCounts(teams, votes);
+  const maxCount = teams.reduce((max, team) => Math.max(max, countsById.get(team.id) || 0), 0);
+
+  if (maxCount === 0) {
+    winnerName.textContent = '未判定';
+    return;
+  }
+
+  const winners = teams
+    .filter((team) => (countsById.get(team.id) || 0) === maxCount)
+    .slice()
+    .sort(byEntryNo);
+
+  winnerName.textContent = winners.length > 1
+    ? `同票: ${winners.map((team) => team.title).join('、')}`
+    : winners[0].title;
+}
+
+function renderAggregates() {
+  renderGlobalResults(adminState.teams, adminState.votes);
+  renderSummaryTable(adminState.teams, adminState.votes);
+  determineWinner(adminState.teams, adminState.votes);
+}
+
+function byEntryNoAndId(a, b) {
+  const diff = byEntryNo(a, b);
+  if (diff !== 0) return diff;
+  return String(a.id).localeCompare(String(b.id));
+}
+
+/* 表示切替パネルを組み直す必要があるかどうかの署名。participating は含めない
+   （票と同じく、参加状態の変化だけでは表示切替パネルを組み直さないため） */
+function participationSignature(teams) {
+  return JSON.stringify(
+    teams
+      .slice()
+      .sort(byEntryNoAndId)
+      .map((team) => ({
+        id: team.id,
+        entryNo: team.entryNo,
+        title: team.title,
+        section: team.section,
+        finalist: team.finalist === true
+      }))
+  );
 }
 
 function computeFinalists(teams) {
@@ -183,10 +319,36 @@ function renderParticipationPanel(teams) {
   updateParticipationCounter();
 }
 
+/* teams の顔ぶれ・名称・並びは変わっていない（participating だけが変わった）場合に、
+   一覧を組み直さずチェック状態と表示中の数だけを更新する */
+function updateParticipationCheckboxStates(teams) {
+  const byId = new Map(teams.map((team) => [team.id, team]));
+  candidateListBody.querySelectorAll('.participating-toggle').forEach((input) => {
+    const team = byId.get(input.dataset.teamId);
+    if (team) {
+      input.checked = team.participating === true;
+    }
+  });
+  updateParticipationCounter();
+}
+
 function updateParticipationCounter() {
   const candidates = computeCandidates(adminState.teams);
   const shown = candidates.filter((team) => isVisibleTeam(team)).length;
   participationCounter.textContent = `${shown} / ${candidates.length}`;
+}
+
+/* teams の更新を受け取る共通の入口（Firebase購読・デモモードの再描画の両方から呼ぶ）。
+   集計パネルは常に全チームで作り直すが、表示切替パネルは組成が変わったときだけ組み直す */
+function handleTeamsUpdate(teams) {
+  adminState.teams = teams;
+  const signature = participationSignature(teams);
+  if (signature !== adminState.participationSignature) {
+    adminState.participationSignature = signature;
+    renderParticipationPanel(teams);
+  } else {
+    updateParticipationCheckboxStates(teams);
+  }
 }
 
 candidateListBody.addEventListener('change', async (event) => {
@@ -217,60 +379,52 @@ candidateListBody.addEventListener('change', async (event) => {
   }
 });
 
-function determineWinner(teams, votes) {
-  if (!teams.length) {
-    winnerName.textContent = '未判定';
-    return;
-  }
-
-  const counts = teams.map((team) => ({
-    id: team.id,
-    title: team.title,
-    count: votes.filter((vote) => vote.teamId === team.id).length
-  }));
-
-  const winner = counts.reduce((top, current) => (current.count > top.count ? current : top), counts[0]);
-  winnerName.textContent = winner ? winner.title : '未判定';
-}
-
 function updateVotingToggle() {
   toggleVotingStatus.textContent = adminState.isOpen ? '投票を停止する' : '投票を開始する';
   toggleVotingStatus.className = `secondary-button ${adminState.isOpen ? 'open' : 'closed'}`;
 }
 
-async function fetchDashboardData() {
-  if (isFirebaseConfigured()) {
-    const db = ensureFirebase();
-    const [teamsSnap, votesSnap, settingsSnap] = await Promise.all([
-      db.ref('audienceApp/teams').once('value'),
-      db.ref('audienceApp/votes').once('value'),
-      db.ref('audienceApp/settings').once('value')
-    ]);
+/* Firebase使用時: teams・votes・settings を on('value') で購読する（5.6）。
+   変化があるたびにコールバックが呼ばれ、集計パネルと受付ボタンの表示を更新する */
+function subscribeToFirebase(db) {
+  if (adminState.subscribed) return;
+  adminState.subscribed = true;
 
-    const teams = Object.entries(teamsSnap.val() || {}).map(([id, team]) => ({ id, ...team }));
-    const votes = Object.values(votesSnap.val() || {});
-    const settings = settingsSnap.val() || {};
-    adminState.teams = teams;
+  db.ref('audienceApp/teams').on('value', (snapshot) => {
+    const teams = Object.entries(snapshot.val() || {}).map(([id, team]) => ({ id, ...team }));
+    handleTeamsUpdate(teams);
+    renderAggregates();
+  }, (error) => {
+    console.error('teams の購読でエラーが発生しました。', error);
+  });
+
+  db.ref('audienceApp/votes').on('value', (snapshot) => {
+    adminState.votes = Object.values(snapshot.val() || {});
+    renderAggregates();
+  }, (error) => {
+    console.error('votes の購読でエラーが発生しました。', error);
+  });
+
+  db.ref('audienceApp/settings').on('value', (snapshot) => {
+    const settings = snapshot.val() || {};
     adminState.isOpen = !!settings.isOpen;
-
-    renderSummaryTable(teams, votes);
-    renderGlobalResults(teams, votes);
-    renderParticipationPanel(teams);
-    determineWinner(teams, votes);
     updateVotingToggle();
-    return;
-  }
+  }, (error) => {
+    console.error('settings の購読でエラーが発生しました。', error);
+  });
+}
 
+/* デモモード（localStorage）: on('value') に相当する仕組みがないため、
+   入室時と操作のたびに、ブラウザ内のデータから再描画する */
+function fetchDashboardData() {
   const teams = getLocalStorageData('teams', DEFAULT_TEAMS);
   const votes = getLocalStorageData('votes', []);
   const settings = getLocalStorageData('settings', { isOpen: true });
-  adminState.teams = teams;
-  adminState.isOpen = !!settings.isOpen;
 
-  renderSummaryTable(teams, votes);
-  renderGlobalResults(teams, votes);
-  renderParticipationPanel(teams);
-  determineWinner(teams, votes);
+  adminState.votes = votes;
+  adminState.isOpen = !!settings.isOpen;
+  handleTeamsUpdate(teams);
+  renderAggregates();
   updateVotingToggle();
 }
 
@@ -282,12 +436,12 @@ toggleVotingStatus.addEventListener('click', async () => {
   if (isFirebaseConfigured()) {
     const db = ensureFirebase();
     await db.ref('audienceApp/settings').set({ isOpen: nextState });
+    // 購読（on('value')）が settings の変化を受けて updateVotingToggle() を呼ぶため、ここでの手動更新は不要
   } else {
     setLocalStorageData('settings', { isOpen: nextState });
+    adminState.isOpen = nextState;
+    updateVotingToggle();
   }
-
-  adminState.isOpen = nextState;
-  updateVotingToggle();
 });
 
 adminLoginForm.addEventListener('submit', async (event) => {
@@ -307,5 +461,10 @@ adminLoginForm.addEventListener('submit', async (event) => {
   loginPanel.classList.add('hidden');
   dashboardPanel.classList.remove('hidden');
   participationPanel.classList.remove('hidden');
-  await fetchDashboardData();
+
+  if (isFirebaseConfigured()) {
+    subscribeToFirebase(ensureFirebase());
+  } else {
+    fetchDashboardData();
+  }
 });

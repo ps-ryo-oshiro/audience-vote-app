@@ -45,10 +45,12 @@
             <button id="toggle-voting-status" class="secondary-button" type="button"></button>
           </div>
           <div>
-            <p style="margin:0; color: var(--muted);">優勝アプリ</p>
+            <p style="margin:0; color: var(--muted);">オーディエンス賞候補</p>
             <strong id="winner-name">未判定</strong>
           </div>
         </div>
+
+        <p class="helper-text">総票数: <strong id="total-votes-count">0</strong>票<span id="excluded-votes-note" class="excluded-note hidden"></span></p>
 
         <div class="grid-two">
           <div>
@@ -60,6 +62,8 @@
             <table>
               <thead>
                 <tr>
+                  <th>順位</th>
+                  <th>No</th>
                   <th>アプリ名</th>
                   <th>部門</th>
                   <th>得票数</th>
