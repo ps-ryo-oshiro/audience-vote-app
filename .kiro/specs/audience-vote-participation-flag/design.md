@@ -1,312 +1,422 @@
 # Design Document
 
 ## Overview
-本機能は、audience-vote-appのチームデータに参加確定フラグ(`participating`)を導入し、運営担当者が事前に全チーム（本戦確定12チーム＋落選候補）をCSV登録した上で、当日は管理画面のチェックボックス操作だけで各チームを投票対象に組み込めるようにする。あわせて、この機能が実運用で意味を持つための前提として、投票データ未保存・Firebase Auth不整合・二重投票防止未実効・管理者パスワード公開という既存の本番稼働阻害要因を解消する。
+本機能は、audience-vote-app の48チームを事前に一括登録し、本戦確定12チームは常に表示、敗者復活候補のチームは当日管理画面で表示・非表示を切り替えられるようにする。チームは審査アプリ（judge-app）のデータから登録スクリプトで生成し、Firebase CLI で投票アプリ専用のDBへ書き込む。紹介動画URLや名称の修正も同じ手順で追記する。あわせて、投票が保存されない・二重投票を防げていない・設定漏れに気づけない、といった本番稼働を妨げる問題を解消する。
 
-**Users**: 運営担当者（管理画面利用者）が事前登録・当日切替・集計確認に利用し、来場者（投票者）が投票画面で参加確定チームのみを閲覧・投票する。
+**Users**: 開発担当者（照屋さん）が事前登録と情報の追記を行う。運営担当者は当日、管理画面で敗者復活候補の表示切替・受付のON/OFF・集計確認を行う。来場者はQRコードから投票画面を開き、ログインせずに1票を投じる。
 
-**Impact**: 既存のチームデータ構造・CSV取込処理・投票画面表示ロジック・Cloudflare Workerの`/api/vote`処理・Firebase Realtime Databaseのセキュリティルールを変更する。新規ファイル・新規モジュールは追加しない。
+**Impact**: 接続先を投票アプリ専用のFirebaseプロジェクト `audience-vote-2026` に切り替える。judge-app は読み取りのみで扱う。管理画面のCSV/Excel取込を廃止する。既存のファイル構成は維持し、配信・設定・データ登録のための最小限のファイルを追加する。
 
 ### Goals
-- 運営担当者が参加フラグの切替だけで当日の敗者復活枠追加を完結できる
-- 投票画面・集計が本戦チームと敗者復活枠チームを区別せず同列に扱う
-- 投票データが確実にFirebaseへ永続化され、不正・無効な投票が拒否される
-- 2026/9/12の本審査開始までに本番Cloudflare Workers環境で確実に動作する
+- 当日の運用が「敗者復活候補のチェックを入れる」だけで完結する
+- 本戦確定チームが、誤操作やデータの不整合があっても投票画面から消えない
+- 投票が確実に保存され、無効な投票や二重投票が拒否される。設定漏れはエラーとして表に出る
+- 2026/9/12 10:00 の本審査までに、本番環境で確実に動作する
 
 ### Non-Goals
-- 本戦確定チームと敗者復活枠チームの見た目上の区別表示
-- 部門賞・総合グランプリなど、オーディエンス賞以外の審査ロジック
-- 投票結果のリアルタイム反映（`.on('value')`によるライブ更新）
-- 独自ドメイン設定、CI/CD自動化、テスト基盤（Jest等）の新設
+- 来場者・管理者のログイン認証
+- 管理画面でのチームの追加・削除・名称編集・ファイル取込
+- DBへの直接書き込みの防止（requirements の「既知のリスク」で許容済み）
+- 投票画面での本戦／敗者復活の見た目の区別、ライブ更新、独自ドメイン、CI/CD、テスト基盤の新設
 
 ## Boundary Commitments
 
 ### This Spec Owns
-- チームデータの`participating`フィールド（スキーマ・デフォルト値・更新経路）
-- CSV/Excel取込のupsertロジック（既存チームの更新／新規チームの追加）
-- 管理画面における参加フラグの表示・切替UI
-- 投票画面における参加確定チームのみの表示フィルタ
-- Cloudflare Workerの`/api/vote`におけるteamId実在検証・参加フラグ検証・投票データ永続化
-- Firebase Realtime Databaseのセキュリティルール（`teams`/`settings`/`votes`）と、それに整合する管理画面側の認証呼び出し
-- 二重投票防止のためのKV namespaceバインド設定
-- 管理者ログイン認証情報の変更
+- チームのデータ構造（`entryNo`・`finalist`・`participating`・`videoUrl`）と、「表示するかどうか」の判定規則
+- 登録スクリプト（初期登録・動画URLの追記・名称の修正のパッチ生成）と、その実行手順
+- 管理画面の敗者復活候補の表示切替UI・集計表示、投票画面の絞り込み・並び順・エントリーNoの表示
+- `/api/vote` の検証・保存・二重投票防止と、設定漏れ時の挙動
+- 投票アプリ専用DB（`audience-vote-2026`）のセキュリティルール
+- 配信対象ファイルの制御と、接続値の置き場所
+- 手順書（`docs/DEPLOY.md`・`docs/TEAM-DATA.md`・`README.md`）の、上記に関わる記述
 
 ### Out of Boundary
-- 部門賞・総合グランプリの判定ロジック（審査員採点。本システムのスコープ外）
-- 投票画面のリアルタイム更新（ページ再読み込みなしの反映は本specでは扱わない）
-- Firebase Authの本格的なメール/パスワード認証への置き換え（将来検討事項。本specでは匿名認証によるルール整合のみ対応）
-- チーム情報の削除・編集専用UI（取込・参加切替以外の管理操作）
+- judge-app の値・ルール・コードの変更（読み取り以外の操作は一切しない）
+- 部門賞・グランプリなど、オーディエンス賞以外の審査
+- 投票受付の停止をWorker側で強制すること（投票画面での無効化のみ。要件8.3）
+- 本戦確定チームを非表示にする操作（本仕様では提供しない。必要になった場合は登録スクリプトで区分を変える）
 
 ### Allowed Dependencies
-- 既存のFirebase Realtime Database構成（`audienceApp/teams`, `audienceApp/votes`, `audienceApp/settings`）
-- 既存のCloudflare Workers + Wrangler構成（`wrangler.jsonc`, `worker.js`）
-- Firebase RTDBの公開REST API（`https://<project>-default-rtdb.firebaseio.com/...json`）。Firebase Admin SDK・サービスアカウントは使用しない
-- 既存のxlsx.js（CDN）によるCSV/Excelパース処理
+- Firebase RTDB（`audience-vote-2026`、`asia-southeast1`）: ブラウザからは compat SDK 10.12.2、Workerからは REST API（認証なし）で使う。Admin SDK・サービスアカウントは使わない
+- Cloudflare Workers + Static Assets + KV（`AUDIENCE_VOTES`）
+- Firebase CLI（`npx firebase-tools`）: DBのオーナー権限で、登録パッチの書き込み・ルールの反映・judge-app の `/config/teams` の読み取りに使う
+- Node.js 24（登録スクリプト。標準ライブラリのみ）
 
 ### Revalidation Triggers
-- `audienceApp/teams`のデータ構造（フィールド追加・削除）を変更する場合
-- `firebase.rules.json`の`.write`/`.read`条件を変更する場合
-- `/api/vote`のリクエスト/レスポンス契約を変更する場合
-- Workerの実行環境変数（`FIREBASE_DB_URL`）の追加・削除
+- チームのデータ構造、または「表示するかどうか」の判定規則の変更（`app.js`・`admin.js`・`worker.js` の3か所で揃える必要がある）
+- `firebase.rules.json` の変更
+- `/api/vote` のリクエスト・レスポンスの形の変更
+- 配信するファイルの追加・名前変更（`.assetsignore` の許可リストの更新が必要）
+- デプロイ先の Cloudflare アカウントの変更（公開URLとKVの作り直しが発生する）
 
 ## Architecture
 
 ### Existing Architecture Analysis
-現行アーキテクチャは、ブラウザから直接Firebase Realtime Databaseへ読み書きするクライアント主導型と、投票の二重防止のみを担う薄いCloudflare Worker API（`/api/vote`）を組み合わせた構成。本specはこのパターンを維持し、Workerの責務を「二重投票防止」から「二重投票防止＋teamId/参加フラグ検証＋投票データ永続化」へ拡張する。新しいアーキテクチャパターンは導入しない。
+- ブラウザがFirebase RTDBを直接読み書きし、投票だけを薄いWorker（`/api/vote`）経由にする構成。この構成は維持する
+- 実装済み（コミット `265944c`・`fb06b4a`）で活かすもの: 参加フラグの切替UIの骨格、投票画面の絞り込み、Workerの検証と保存
+- 実装済みで廃止するもの: CSV/Excel取込（`mergeTeams`・`validateRows`・`readUploadFile`・upload UI・xlsx.js）、匿名認証
+- 新たに変える点: 本戦区分とエントリーNo、表示判定の共通化、登録スクリプト、Workerの設定漏れ時の挙動、投票画面の接続の扱い、HTMLエスケープ、配信対象の制御、接続値の置き場所、ルール
 
 ### Architecture Pattern & Boundary Map
 
 ```mermaid
 graph TB
-    Voter[Voting Page Browser]
-    Admin[Admin Dashboard Browser]
-    Worker[Cloudflare Worker]
-    KV[KV Namespace]
-    RTDB[Firebase Realtime Database]
+    Voter[Voting Page]
+    Admin[Admin Dashboard]
+    Worker[Voting API Worker]
+    KV[KV AUDIENCE_VOTES]
+    VDB[RTDB audience-vote-2026]
+    JDB[RTDB judge-app]
+    Script[Team Patch Script]
+    Dev[開発担当者の端末 Firebase CLI]
 
-    Voter -->|GET teams settings| RTDB
-    Voter -->|POST vote| Worker
-    Worker -->|GET team by id| RTDB
-    Worker -->|check and set voter token| KV
-    Worker -->|POST vote record| RTDB
-    Admin -->|read write teams settings| RTDB
-    Admin -->|signIn anonymously| RTDB
-    Admin -->|read votes| RTDB
+    Voter -->|read teams settings then goOffline| VDB
+    Voter -->|POST api vote| Worker
+    Worker -->|GET team| VDB
+    Worker -->|POST vote| VDB
+    Worker -->|get put voter token| KV
+    Admin -->|write participating settings, read all| VDB
+    Dev -->|database get read only| JDB
+    Dev -->|database get current teams| VDB
+    Dev --> Script
+    Script -->|patch JSON| Dev
+    Dev -->|database update owner| VDB
 ```
 
 **Architecture Integration**:
-- Selected pattern: クライアント直結DB + 薄いAPIサーバーのハイブリッド（現行踏襲）
-- Domain/feature boundaries: チーム参加状態の読み書きはクライアント（Admin Dashboard）が担い、投票の検証・永続化はWorkerが担う。二重責務を避けるため、投票の書き込み経路はWorker経由の1本に統一する（Voting PageがRTDBへ直接votesを書き込むことはしない）
-- Existing patterns preserved: Firebase compat SDKによるクライアント直結、Cloudflare WorkersのAssetsバインディングによる静的配信
-- New components rationale: なし（既存コンポーネントの拡張のみ）
-- Steering compliance: 新規モジュール禁止・Firebase Admin SDK禁止の制約を遵守
+- Selected pattern: ブラウザからDB直結 + 投票だけWorker経由（現行を踏襲）
+- Domain/feature boundaries: チームの登録・情報の追記は開発担当者の CLI だけが行う。管理画面が書くのは敗者復活候補の `participating` と `settings` だけ。票を書くのは Worker だけ。judge-app に触れるのは、開発担当者の端末での読み取りコマンドだけ
+- 表示判定は `finalist === true || participating === true` に統一し、投票画面・Worker・管理画面（表示中の数）で同じ規則を使う。本戦確定チームは、`participating` の値にかかわらず常に表示される（要件1.2を、データの状態ではなく判定規則で保証する）
+- New components rationale: `.assetsignore`（非公開ファイルの配信を止める）、`firebase-config.example.js`（要件11.2）、`firebase.json`（ルールの反映）、`scripts/team-patch.mjs`（要件2・12）、`docs/TEAM-DATA.md`（登録手順）
 
 ### Technology Stack
 
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
-| Frontend | Vanilla JS (既存) | 参加フラグUI、投票フィルタ | フレームワーク導入なし |
-| Backend | Cloudflare Workers (`worker.js`) | teamId/参加フラグ検証、投票永続化 | Fetch APIのみ、Admin SDK不使用 |
-| Data / Storage | Firebase Realtime Database | チーム・投票・設定の永続化 | 既存構成を維持、ルールのみ変更 |
-| Data / Storage | Cloudflare KV (`AUDIENCE_VOTES`) | 投票者トークンの重複防止 | 新規バインド追加（既存コード内で参照済み） |
-| Infrastructure | Wrangler (`wrangler.jsonc`) | 環境変数・KVバインド定義 | `vars.FIREBASE_DB_URL`を追加 |
+| Frontend | Vanilla JS、Firebase compat SDK 10.12.2 | 投票画面・管理画面 | `firebase-auth-compat.js` と xlsx.js の読み込みを削除する |
+| Backend | Cloudflare Workers（`worker.js`） | `/api/vote` | Fetch API のみ |
+| Data | Firebase RTDB `audience-vote-2026`（`asia-southeast1`、無料プラン） | チーム・票・受付設定 | 同時接続の上限は100。現在はロックモード |
+| Data | Cloudflare KV `AUDIENCE_VOTES` | 投票済みの端末トークン | TTLは30日（既存） |
+| Tooling | Node.js 24、Firebase CLI 15.x | 登録パッチの生成と書き込み、ルールの反映 | スクリプトは標準ライブラリのみ |
+| Infrastructure | Wrangler | デプロイ、secret、KV | デプロイ先アカウントは未確定（Risks参照） |
 
 ## File Structure Plan
 
-新規ファイルは作成しない。既存ファイル内の関数追加・修正のみで実装する。
+### Directory Structure
+```
+audience-vote-app/
+├── index.html / app.js          # 投票画面（配信する）
+├── admin.html / admin.js        # 管理画面（配信する）
+├── style.css                    # 共通スタイル（配信する）
+├── firebase-config.js           # 接続値・入室ID（git管理外・配信する）
+├── firebase-config.example.js   # 新規: 接続設定のひな形（配信しない）
+├── worker.js                    # Voting API（配信しない）
+├── wrangler.jsonc               # Worker設定 + KV binding
+├── .assetsignore                # 新規: 配信するファイルの許可リスト
+├── .dev.vars                    # ローカル用 FIREBASE_DB_URL（git管理外・配信しない）
+├── firebase.json                # 新規: ルール反映の設定（配信しない）
+├── firebase.rules.json          # 投票アプリ専用DBのルール（配信しない）
+├── scripts/
+│   └── team-patch.mjs           # 新規: 登録・動画URL追記・名称修正のパッチを生成
+└── docs/
+    ├── DEPLOY.md                # デプロイ手順（配信しない）
+    └── TEAM-DATA.md             # 新規: チームデータの登録・追記の手順（配信しない）
+```
+登録作業の中間ファイル（judge-app から読み取ったJSON、現在のチーム一覧、生成したパッチ）は、リポジトリの外（`06.コンテスト/work/`）に置く。
 
-### Modified Files
-- `admin.js` — `DEFAULT_TEAMS`に`participating: true`追加、`mergeTeams`関数新設、CSV取込ハンドラのupsert化、`validateRows`の`participating`列パース対応、`renderGlobalResults`への参加フラグチェックボックス追加、チェックボックス変更ハンドラ追加、ログイン処理への`signInAnonymously()`追加
-- `admin.html` — `global-results-body`のテーブルヘッダに参加列を追加、`firebase-auth-compat.js`のscriptタグ追加
-- `app.js` — `DEFAULT_TEAMS`に`participating: true`追加、`readTeams()`に参加フラグフィルタを追加
-- `worker.js` — `getTeam`関数・`recordVote`関数を新設、`/api/vote`ハンドラにteamId検証・参加フラグ検証・投票永続化呼び出しを追加
-- `firebase.rules.json` — `teams`/`settings`の`.write`を`true`に緩和、`votes`の`.read`を`auth != null`のまま維持
-- `wrangler.jsonc` — `vars.FIREBASE_DB_URL`を追加、`kv_namespaces`に`AUDIENCE_VOTES`のバインドを追加
-- `firebase-config.js` — 実際のFirebaseプロジェクト値へ置換、`audienceDemoAdmin`のパスワードを変更
+### Modified / New Files
+- `app.js` — 表示判定を `isVisibleTeam()` に置き換える。部門ごとに `entryNo` の昇順で並べる。「No.{entryNo} {title}」と表示する。動画URLが `^https?://` のときだけリンクを出す。チーム名はエスケープする。投票データの読み込みを削除する。読み込み後に `firebase.database().goOffline()` する。読み込み失敗時は再読み込みを促す。デモ用の `DEFAULT_TEAMS` に `entryNo`・`finalist` を追加する
+- `admin.js` — CSV取込の関連コードをすべて削除する（`makeTeamKey`・`parseParticipatingFlag`・`mergeTeams`・`readUploadFile`・`validateRows`・uploadのハンドラ）。匿名認証を削除する。全体集計の表を「No・アプリ名・部門・区分・得票数・表示」の列にし、本戦→敗者復活候補の順、各区分内はNo順で並べる。本戦の行は「本戦（常に表示）」と表示してチェックボックスを出さない。表示中の敗者復活候補の数を表示し、切替のたびに更新する。保存に失敗したら、チェックを戻してメッセージを出す。チーム名はエスケープする。`DEFAULT_TEAMS` を `app.js` と揃える
+- `admin.html` — アップロード欄（`#upload-panel`）、xlsx.js、`firebase-auth-compat.js` を削除する。全体集計の表の見出しを6列にする。表示中の数とエラーメッセージの表示欄を追加する
+- `worker.js` — 表示判定を `isVisibleTeam()` にする。`FIREBASE_DB_URL` か `AUDIENCE_VOTES` が欠けていれば500 `server_misconfigured` を返す。メモリ上のフォールバックを削除する。JSONの解析エラーとそれ以外のエラーを区別する
+- `firebase.rules.json` — 下の「Data Contracts」のルールに置き換える
+- `firebase.json`（新規） — `{ "database": { "rules": "firebase.rules.json" } }`
+- `wrangler.jsonc` — `kv_namespaces` に `AUDIENCE_VOTES` を追加する。`FIREBASE_DB_URL` は書かない（secret で渡す）
+- `.assetsignore`（新規） — 許可リスト方式: `*` の後に `!index.html` `!admin.html` `!app.js` `!admin.js` `!style.css` `!firebase-config.js`
+- `.gitignore` — `firebase-config.js` と `.dev.vars` を追加する。`firebase-config.js` は `git rm --cached` で管理から外す
+- `firebase-config.example.js`（新規） — 項目名とプレースホルダーだけを書く（`audienceDemoAdmin` も含む）
+- `scripts/team-patch.mjs`（新規） — 下の「Team Patch Script」を参照
+- `docs/TEAM-DATA.md`（新規）、`docs/DEPLOY.md`、`README.md` — 接続先、secret、KV、`.assetsignore`、ルールの反映、チームの登録と追記、公開後の確認手順を記載する。README の「CSV/Excel取込フォーマット」の章は削除する
 
 ## System Flows
 
-### 投票受付フロー
-
+### 投票受付
 ```mermaid
 sequenceDiagram
     participant V as Voting Page
-    participant W as Worker
-    participant KV as KV Namespace
-    participant DB as Firebase RTDB
-
+    participant W as Voting API
+    participant KV as KV
+    participant DB as RTDB
     V->>W: POST /api/vote teamId voterToken
-    W->>KV: get voter token status
+    alt FIREBASE_DB_URL or KV missing
+        W-->>V: 500 server_misconfigured
+    end
+    W->>KV: get voter token
     alt already voted
         W-->>V: 409 already_voted
-    else not voted
-        W->>DB: GET team by id
-        alt team not found
-            W-->>V: 400 invalid_team
-        else team not participating
-            W-->>V: 403 team_not_participating
-        else team participating
-            W->>DB: POST vote record
-            W->>KV: set voter token voted
-            W-->>V: 200 ok
-        end
     end
+    W->>DB: GET audienceApp/teams/teamId
+    alt not found or invalid id
+        W-->>V: 400 invalid_team
+    else not visible
+        W-->>V: 403 team_not_participating
+    end
+    W->>DB: POST audienceApp/votes
+    W->>KV: put voter token
+    W-->>V: 200 ok
 ```
+票の保存に成功してから、KVに投票済みの印を付ける。KVの確認と書き込みはアトミックではないので、同じ端末から同時に2回送ると2票入る可能性がある。これは許容する。
 
-**Key decisions**: KVの二重投票チェックを最初に行うことで既存の挙動を維持しつつ、teamId/参加フラグ検証をその後段に追加する。投票記録の永続化に成功した後でKVに投票済みフラグを立てることで、Firebase書き込み失敗時に「投票済み」扱いにしてしまう事故を防ぐ。
-
-### CSV/Excel取込フロー（upsert）
-
+### チームの登録・追記と当日の運用
 ```mermaid
 flowchart LR
-    Upload[CSV or Excel file] --> Parse[Parse rows]
-    Parse --> Validate[Validate required columns]
-    Validate -->|invalid| Error[Show error message]
-    Validate -->|valid| Fetch[Fetch existing teams]
-    Fetch --> Merge[Merge by section and title key]
-    Merge -->|existing match| Update[Update title section videoUrl]
-    Merge -->|no match| Create[Create new team participating false]
-    Update --> Save[Persist merged team list]
-    Create --> Save
+    J[judge-app config teams] -->|database get read only| S1[team-patch seed]
+    C[現在の audienceApp teams] --> S1
+    F[本戦12チームのエントリーNo] --> S1
+    S1 -->|patch JSON| U1[database update]
+    S1 -->|対応しない部門 存在しないNo| E[標準エラーに一覧]
+    V[寺司さんの No or アプリ名 と URL の一覧] --> S2[team-patch videos]
+    C --> S2
+    S2 -->|videoUrl だけの patch| U1
+    U1 --> DB[(audienceApp teams)]
+    DB --> A[当日 管理画面で敗者復活候補をON]
 ```
+- パッチはすべて「チームID/項目」を1つのキーにした multi-path の形で、`database:update /audienceApp/teams` によって、書く項目だけを更新する（他の項目を消さない）
+- `seed` を再実行しても、既存のチームは `finalist`（と本戦の `participating: true`）以外を書き換えない。当日の切替状態・動画URL・名称の修正が保たれる
 
 ## Requirements Traceability
 
 | Requirement | Summary | Components | Interfaces | Flows |
 |-------------|---------|------------|------------|-------|
-| 1.1-1.3 | チーム参加状態の管理 | Team Management Service | Team data model | - |
-| 2.1-2.4 | CSV/Excel upsert取込 | Team Management Service (Admin Dashboard) | uploadForm handler | CSV/Excel取込フロー |
-| 3.1-3.3 | 参加状態の当日切替 | Admin Dashboard | 参加フラグチェックボックス | - |
-| 4.1-4.3 | 投票画面の表示フィルタ | Voting Page | readTeams filter | - |
-| 5.1-5.2 | オーディエンス賞集計 | Admin Dashboard | renderGlobalResults, determineWinner | - |
-| 6.1-6.4 | 投票データの受付・検証 | Voting API | POST /api/vote | 投票受付フロー |
-| 7.1-7.2 | 二重投票防止 | Voting API | KV namespace | 投票受付フロー |
-| 8.1-8.2 | 管理操作の書き込み整合性 | Admin Dashboard, Data Store Rules | signInAnonymously, firebase.rules.json | - |
-| 9.1-9.2 | 管理者認証情報の保護 | Admin Dashboard | ログインフォーム | - |
+| 1.1 | 各チームの項目を保持 | Team Data Model | Team | - |
+| 1.2 | 本戦は常に表示 | Voting Page, Voting API, Admin Dashboard | `isVisibleTeam()` | 投票受付 |
+| 1.3, 1.4 | 敗者復活候補の初期値は非表示、未設定は非表示 | Team Patch Script, `isVisibleTeam()` | `seed` | 登録・追記 |
+| 2.1, 2.2 | 48チームを登録し、本戦と候補に分ける | Team Patch Script | `seed --finalists` | 登録・追記 |
+| 2.3 | 再実行しても重複せず、状態を変えない | Team Patch Script | `seed --current`、チームID `entry-NN` | 登録・追記 |
+| 2.4 | judge-app は読み取りのみ | Runbook | `database:get` | 登録・追記 |
+| 2.5 | 対応しない部門・存在しないNoを一覧で示す | Team Patch Script | 標準エラーの出力 | 登録・追記 |
+| 2.6 | 管理画面に追加・削除・取込を置かない | Admin Dashboard | upload UI の削除 | - |
+| 3.1, 3.2, 3.3 | 候補だけ切替、本戦は常に表示と明示、表示中の数 | Admin Dashboard | `renderGlobalResults` | - |
+| 3.4, 3.5, 3.6 | 即時反映・保存・失敗時は元に戻す | Admin Dashboard | `.participating-toggle` のハンドラ | - |
+| 4.1, 4.2, 4.3 | 表示対象だけを区別なく表示 | Voting Page | `readTeams`、`isVisibleTeam()` | - |
+| 4.4 | 動画URLがなければリンクを出さない | Voting Page | `renderTeams` | - |
+| 4.5 | ログインなしで投票 | Voting Page, Voting API | `POST /api/vote` | 投票受付 |
+| 4.6, 4.7 | エントリーNoを表示し、No順に並べる | Voting Page | `renderTeams` | - |
+| 5.1, 5.2 | 全チームの集計と最多得票の提示 | Admin Dashboard | `renderSummaryTable`、`renderGlobalResults`、`determineWinner` | - |
+| 6.1, 6.2, 6.3 | チームの実在・表示状態の検証 | Voting API | `getTeam`、`isVisibleTeam()` | 投票受付 |
+| 6.4 | 票の保存 | Voting API | `recordVote` | 投票受付 |
+| 7.1, 7.2 | 二重投票の拒否、再起動をまたいで保持 | Voting API | KV `AUDIENCE_VOTES` | 投票受付 |
+| 8.1, 8.2 | 認証なしで切替・受付・集計ができる | Admin Dashboard, Data Store Rules | `firebase.rules.json` | - |
+| 8.3 | 受付停止中はフォームを無効化 | Voting Page | `updateVoteStatus`（既存） | - |
+| 9.1, 9.2 | 入室ID・パスワードの変更と不一致時の拒否 | Admin Dashboard, Deployment Config | `firebase-config.js` の `audienceDemoAdmin` | - |
+| 10.1, 10.5 | 専用DBに保存し、投票アプリの領域以外を拒否 | Data Store Rules | `firebase.rules.json`、`firebase.json` | - |
+| 10.2 | 配布物に judge-app の所在を含めない | Deployment Config | `.assetsignore`、`firebase-config.js` | - |
+| 10.3, 10.4 | judge-app を変更せず、公開後も従来どおりか確認 | Runbook | 読み取りのみのCLI | 登録・追記 |
+| 11.1, 11.2 | 接続値を git に含めず、ひな形を置く | Deployment Config | `.gitignore`、`firebase-config.example.js` | - |
+| 11.3, 11.4 | 手元の設定で公開し、Workerも同じDBを見る | Deployment Config, Runbook | `wrangler deploy`、`wrangler secret put FIREBASE_DB_URL` | - |
+| 11.5 | 設定ファイルがなければデモモード | Voting Page | `isFirebaseConfigured`（既存） | - |
+| 12.1, 12.2, 12.3 | 動画URLだけを更新、区分と表示状態は変えない、該当なしは一覧 | Team Patch Script | `videos --file` | 登録・追記 |
+| 12.4 | 特定チームの名称だけを修正 | Team Patch Script | `rename --no --title` | 登録・追記 |
+| 13.1, 13.2 | 投票画面は常時接続を持たず、管理画面の接続を残す | Voting Page | `goOffline()`、投票データを読まない | - |
+| 13.3 | 読み込み失敗時に再読み込みを促す | Voting Page | 起動時の `catch` | - |
 
 ## Components and Interfaces
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies (P0/P1) | Contracts |
 |-----------|--------------|--------|--------------|--------------------------|-----------|
-| Team Management Service | Admin (admin.js) | チームデータのupsertと参加状態管理 | 1, 2, 3 | Firebase RTDB (P0) | State |
-| Admin Dashboard | Admin (admin.js/admin.html) | 参加フラグUI、集計表示、ログイン | 3, 5, 8, 9 | Team Management Service (P0), Firebase Auth (P1) | State |
-| Voting Page | Frontend (app.js/index.html) | 参加確定チームの表示、投票送信 | 4, 8 | Voting API (P0), Firebase RTDB (P1) | State |
-| Voting API | Worker (worker.js) | teamId/参加検証、投票永続化、二重投票防止 | 6, 7 | Firebase RTDB REST (P0), KV Namespace (P0) | API |
+| Team Data Model | Data（3ファイルで共有する規則） | チームの項目と表示判定 | 1 | - | State |
+| Voting Page | Frontend（`app.js`） | 表示対象チームの表示と投票送信 | 1.2, 4, 8.3, 11.5, 13 | Voting API (P0), RTDB (P0) | State |
+| Admin Dashboard | Frontend（`admin.js`、`admin.html`） | 候補の表示切替・集計・入室チェック | 1.2, 2.6, 3, 5, 8.1, 8.2, 9 | RTDB (P0) | State |
+| Voting API | Worker（`worker.js`） | 検証・保存・二重投票防止 | 1.2, 4.5, 6, 7, 11.4 | RTDB REST (P0), KV (P0) | API |
+| Data Store Rules | Config（`firebase.rules.json`、`firebase.json`） | 投票アプリ専用DBのアクセス制御 | 8.1, 8.2, 10.1, 10.5 | Firebase CLI (P1) | State |
+| Deployment Config | Config（`wrangler.jsonc`、`.assetsignore`、`.gitignore`、`firebase-config.example.js`） | 配信対象と接続値の管理 | 9.1, 10.2, 11 | Wrangler (P0) | - |
+| Team Patch Script | Tooling（`scripts/team-patch.mjs`） | 登録・追記・修正のパッチ生成 | 1.3, 2.1〜2.3, 2.5, 12 | Firebase CLI (P0) | Batch |
+| Runbook | Docs（`docs/TEAM-DATA.md`、`docs/DEPLOY.md`、`README.md`） | 手順と確認項目 | 2.4, 10.3, 10.4, 11.3, 11.4 | - | - |
 
-### Admin (admin.js)
+### Data
 
-#### Team Management Service
-
-| Field | Detail |
-|-------|--------|
-| Intent | CSV/Excel取込のupsertマージと参加フラグの永続化 |
-| Requirements | 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 3.3 |
-
-**Responsibilities & Constraints**
-- チームの一意性は`section`+`title`の正規化キーで判定する（タイトル変更時は別チーム扱いになる制約を許容）
-- 新規チームの`participating`はCSVで明示指定がない限り`false`
-- 既存チームの`participating`はCSV再取込時に上書きしない（当日設定済みのON状態を保護する）
-
-**Dependencies**
-- Outbound: Firebase Realtime Database（`audienceApp/teams`）— 読み書き (P0)
-- Outbound: localStorage（Firebase未設定時のフォールバック）— 読み書き (P1)
-
-**Contracts**: State [x]
-
-##### State Management
-- State model: `{ id, title, section, videoUrl, participating }`の配列
-- Persistence & consistency: Firebase使用時はキー単位の`update()`、localStorage使用時はJSON配列の置換書き込み
-- Concurrency strategy: アップロード直前に最新状態を再取得してからマージすることで、他の管理操作との競合を最小化する（厳密な排他制御は本specのスコープ外）
-
-#### Admin Dashboard
+#### Team Data Model
 
 | Field | Detail |
 |-------|--------|
-| Intent | 参加フラグの切替UI、集計表示、ログイン認証 |
-| Requirements | 3.1, 3.2, 5.1, 5.2, 8.1, 9.1, 9.2 |
+| Intent | チームの項目と「表示するかどうか」の規則を定める |
+| Requirements | 1.1, 1.2, 1.3, 1.4 |
 
-**Responsibilities & Constraints**
-- 全体集計テーブルの各行に参加フラグの切替コントロールを表示する
-- 切替操作は個別行の状態のみを更新し、テーブル全体を再描画しない
-- ログイン処理はFirebase使用時に匿名認証を実行してからログイン状態を確定する
+```typescript
+type Section = 'life' | 'work' | 'local';
+interface Team {
+  id: string;            // `entry-${String(entryNo).padStart(2, '0')}`（例: entry-01）
+  entryNo: number;       // エントリーNo（judge-app の no）
+  title: string;         // アプリ名
+  section: Section;
+  videoUrl: string;      // 空文字は「未設定」
+  finalist: boolean;     // 本戦確定
+  participating: boolean // 敗者復活候補の表示状態。本戦は true で登録する
+}
+function isVisibleTeam(team: Partial<Team> | null): boolean {
+  return !!team && (team.finalist === true || team.participating === true);
+}
+```
+- `isVisibleTeam()` は `app.js`・`admin.js`・`worker.js` の3か所に同じ中身で置く（ビルドがなく、共有モジュールを持てないため）。コメントで「3か所で揃える」ことを明記する
+- `entryNo` がないチーム（デモデータなど）は、並べるときに末尾へ回す
 
-**Dependencies**
-- Outbound: Team Management Service (P0)
-- Outbound: Firebase Auth（`signInAnonymously`）(P1)
+### Frontend
 
-**Contracts**: State [x]
-
-### Frontend (app.js)
-
-#### Voting Page
-
-| Field | Detail |
-|-------|--------|
-| Intent | 参加確定チームのみの一覧表示と投票送信 |
-| Requirements | 4.1, 4.2, 4.3, 8.2 |
-
-**Responsibilities & Constraints**
-- `readTeams()`取得後、`participating === true`のチームのみを描画対象に絞り込む
-- 参加状態が未定義のチームは表示しない（安全側のデフォルト）
-- 投票受付が停止中の場合はフォーム操作を無効化する（既存動作を維持）
-
-**Dependencies**
-- Outbound: Voting API（`POST /api/vote`）(P0)
-- Outbound: Firebase Realtime Database（`audienceApp/teams`, `audienceApp/settings`）読み取り (P1)
-
-**Contracts**: State [x]
-
-### Worker (worker.js)
-
-#### Voting API
+#### Admin Dashboard（`admin.js`、`admin.html`）
 
 | Field | Detail |
 |-------|--------|
-| Intent | 投票リクエストのteamId/参加状態検証、二重投票防止、投票データ永続化 |
-| Requirements | 6.1, 6.2, 6.3, 6.4, 7.1, 7.2 |
+| Intent | 入室チェック、敗者復活候補の表示切替、集計表示、受付のON/OFF |
+| Requirements | 1.2, 2.6, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 5.1, 5.2, 8.1, 8.2, 9.1, 9.2 |
 
 **Responsibilities & Constraints**
-- Firebase Admin SDK・サービスアカウントを使用せず、公開REST APIへのfetchのみで完結する
-- `FIREBASE_DB_URL`が未設定の実行環境（ローカル`wrangler dev`等）では検証をスキップし後方互換を維持する
-- 二重投票チェック（KV/メモリMap）を最初に行い、その後teamId/参加検証、最後に投票永続化とKVフラグ確定の順で処理する
+- 入室は `firebase-config.js` の `audienceDemoAdmin` との文字列比較だけで判定する。Firebase Authentication は呼ばない
+- 全体集計の表（No・アプリ名・部門・区分・得票数・表示）は、本戦の行を先に、続けて敗者復活候補の行を、それぞれNo順に並べる
+  - 本戦の行: 区分「本戦」、表示の列は「常に表示」（チェックボックスなし）
+  - 候補の行: 区分「敗者復活」、表示の列はチェックボックス
+- 表の上に「表示中の敗者復活チーム: n / 候補数」を出し、切替のたびに更新する
+- 切替時は `audienceApp/teams/{id}/participating` だけを `set()` する。失敗したらチェックを元に戻し、`#participation-message` にエラーを出す
+- 集計は表示状態にかかわらず全チームを対象にする。最多得票のチームを優勝候補として示す（同数なら表の並びで先のチーム）
+- チーム名は `escapeHtml` を通して描画する。部門は `SECTION_LABELS` で日本語にして表示する
 
-**Dependencies**
-- Outbound: Firebase RTDB REST API（`GET /audienceApp/teams/{id}.json`, `POST /audienceApp/votes.json`）(P0)
-- Outbound: Cloudflare KV（`AUDIENCE_VOTES`）(P0)
+#### Voting Page（`app.js`）
 
-**Contracts**: API [x]
+| Field | Detail |
+|-------|--------|
+| Intent | 表示対象チームをNo順に表示し、ログインなしで投票を送る |
+| Requirements | 1.2, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 8.3, 11.5, 13.1, 13.2, 13.3 |
+
+**Responsibilities & Constraints**
+- 起動時に `settings` と `teams` だけを読み、描画した後に `goOffline()` する。`votes` は読まない
+- `isVisibleTeam()` が真のチームだけを、部門ごとに `entryNo` の昇順で「No.{entryNo} {title}」と表示する（`entryNo` がなければタイトルだけ）
+- 動画URLは `^https?://` に一致するときだけリンクとして描画する
+- 読み込みに失敗したら「読み込みに失敗しました。ページを再読み込みしてください。」を表示する
+
+### Worker
+
+#### Voting API（`worker.js`）
+
+| Field | Detail |
+|-------|--------|
+| Intent | 票の検証・保存・二重投票防止 |
+| Requirements | 1.2, 4.5, 6.1, 6.2, 6.3, 6.4, 7.1, 7.2, 11.4 |
+
+**Responsibilities & Constraints**
+- `env.FIREBASE_DB_URL` と `env.AUDIENCE_VOTES` の両方が必須。どちらかがなければ500 `server_misconfigured`
+- `teamId` は `^[A-Za-z0-9_-]+$` に一致しなければ `invalid_team`（パスへの注入を防ぐ）
+- `isVisibleTeam(team)` が偽なら403 `team_not_participating`
+- 処理順は「二重投票の確認 → チームの検証 → 票の保存 → KVへの印付け」
 
 ##### API Contract
 | Method | Endpoint | Request | Response | Errors |
 |--------|----------|---------|----------|--------|
-| POST | /api/vote | `{ teamId, voterToken }` | `{ ok: true, teamId, voterToken }` | 400 invalid_request, 400 invalid_team, 403 team_not_participating, 409 already_voted, 400 invalid_json |
+| POST | /api/vote | `{ teamId: string, voterToken: string }` | 200 `{ ok: true, teamId, voterToken }` | 400 `invalid_json`, 400 `invalid_request`, 400 `invalid_team`, 403 `team_not_participating`, 409 `already_voted`, 500 `team_fetch_failed`, 500 `vote_write_failed`, 500 `server_misconfigured` |
+
+### Tooling
+
+#### Team Patch Script（`scripts/team-patch.mjs`）
+
+| Field | Detail |
+|-------|--------|
+| Intent | 登録・動画URLの追記・名称の修正を、`/audienceApp/teams` への multi-path パッチ（JSON）として生成する |
+| Requirements | 1.3, 2.1, 2.2, 2.3, 2.5, 12.1, 12.2, 12.3, 12.4 |
+
+##### Batch / Job Contract
+- 共通: `--current <file>` に現在の `/audienceApp/teams`（`database:get` の出力。空のDBなら `null`）を渡す。パッチは標準出力に出し、問題のある行は標準エラーに出す。パッチのキーは `entry-NN/項目名`
+- `seed --judge <file> --finalists <No,No,...> --current <file>`
+  - 入力: judge-app の `/config/teams`（キー → `{ no, name, department, order }`）
+  - 部門の対応: `ライフ部門`→`life`、`ワーク部門`→`work`、`ローカル部門`→`local`。対応しない行は出力せず、Noを標準エラーに出す（2.5）
+  - 新規チーム（`--current` にないID）: `entryNo`・`title`・`section`・`finalist`・`participating`（本戦は `true`、候補は `false`）・`videoUrl: ""` を出力する
+  - 既存チーム: `finalist` と、本戦の場合の `participating: true` だけを出力する（2.3。当日の切替・動画URL・名称の修正を保つ）
+  - `--finalists` に judge-app に存在しないNoがあれば、パッチを出力せずに終了コード1で止める（2.5）。件数が12でなければ警告を出す（処理は続ける）
+- `videos --file <csv> --current <file>`
+  - 入力CSVの見出しは `no,url` または `title,url`。`title` は前後の空白を除いて完全一致で照合する
+  - 一致した行について `entry-NN/videoUrl` だけを出力する（12.1・12.2）。一致しない行や、URLが `^https?://` でない行は出力せず、標準エラーに出す（12.3）
+- `rename --no <No> --title <新しい名称> --current <file>`
+  - `entry-NN/title` だけを出力する（12.4）。該当チームがなければ終了コード1
+- 適用: `npx firebase-tools database:update /audienceApp/teams <patch.json> --project audience-vote-2026`（DBのオーナー権限で書き込むので、ルールの影響を受けない）
+- judge-app のプロジェクトID・URL・接続値は、スクリプトにもリポジトリ内の文書にも書かない。judge-app のルールは全開放なので、プロジェクトIDが分かればDBの場所が分かるため。手順書では環境変数 `JUDGE_PROJECT_ID` で渡す
+
+### Config
+
+#### Data Store Rules（`firebase.rules.json`）
+下の「Data Contracts」のとおり。反映は `npx firebase-tools deploy --only database --project audience-vote-2026` で行う。
+
+#### Deployment Config
+- `.assetsignore` は許可リスト方式にする。新しく配信するファイルを増やすときは、ここに追加する
+- `FIREBASE_DB_URL` は `npx wrangler secret put FIREBASE_DB_URL` で本番に設定する。値は `firebase-config.js` の `databaseURL` と同じにする（要件11.4。手順書の確認項目にする）
 
 ## Data Models
 
 ### Logical Data Model
-
-**Team（`audienceApp/teams/{id}`）**
-
-| Field | Type | Notes |
-|-------|------|-------|
-| id | string | Firebase自動キーまたはUUID |
-| title | string | アプリ名 |
-| section | string | `life` \| `work` \| `local` |
-| videoUrl | string | 紹介動画URL |
-| participating | boolean | 参加確定フラグ。デフォルト`false` |
-
-**Vote（`audienceApp/votes/{autoId}`）**
-
-| Field | Type | Notes |
-|-------|------|-------|
-| teamId | string | 投票先チームID |
-| voterToken | string | 投票者トークン（端末単位） |
-| votedAt | number | 投票日時（epoch ms） |
+- **Team（`audienceApp/teams/entry-NN`）**: 「Team Data Model」を参照
+- **Vote（`audienceApp/votes/{pushId}`）**: `teamId: string`、`voterToken: string`、`votedAt: number`（epoch ms）
+- **Settings（`audienceApp/settings`）**: `isOpen: boolean`。未設定なら受付停止として扱う（新しいDBでは、管理画面で開始するまで停止中）
 
 ### Data Contracts & Integration
-- CSV/Excel入力: `section`, `title`, `video_url`（必須）、`participating`（任意、`true`/`1`/`on`/`yes`で真、それ以外は無視）
-- Firebase RTDBセキュリティルール: `teams`/`settings`の`.write`を`true`に緩和、`votes`の`.read`のみ`auth != null`を維持（`.write`は既存どおり`true`）
+
+**セキュリティルール**
+```json
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "audienceApp": {
+      "teams":    { ".read": true, ".write": true },
+      "settings": { ".read": true, ".write": true },
+      "votes": {
+        ".read": true,
+        "$voteId": {
+          ".write": "!data.exists() && newData.exists()",
+          ".validate": "newData.hasChildren(['teamId', 'voterToken', 'votedAt'])"
+        }
+      }
+    }
+  }
+}
+```
+- `audienceApp` 以外は読み書きできない（10.5）
+- 票は「新しく追加する」ことしかできず、既存の票の変更・削除や `votes` の一括削除は拒否される
+- `teams`・`settings` は誰でも書ける（8.1。既知のリスク1）。管理画面は `teams` のうち `participating` しか書かないが、ルールでは項目を絞らない
 
 ## Error Handling
-
-### Error Strategy
-既存のエラーハンドリング方針（`showMessage`によるUI表示、Workerの`Response.json`によるステータスコード返却）を踏襲する。
-
-### Error Categories and Responses
-- **User Errors**: 必須列欠如のCSV → 取込エラーメッセージ表示（既存の`validateRows`を拡張）
-- **Business Logic Errors**: 存在しない/未参加チームへの投票 → Worker側で400/403を返却し、投票フォームにエラー表示
-- **System Errors**: Firebase REST APIへのfetch失敗 → Workerは既存の二重投票防止フォールバック（KV/メモリMap）を維持しつつ、投票永続化失敗時はエラーレスポンスを返す
+- **登録の誤り**: 部門が対応しない行 → 登録せず標準エラーに一覧を出す。存在しない本戦No → パッチを出さずに止める。動画URLの一覧で一致しない行 → その行だけ反映せず一覧を出す
+- **業務上の拒否**: 存在しないチーム・表示対象でないチームへの投票 → 400/403。二重投票 → 409（投票画面は「投票済み」表示に切り替える。既存）
+- **切替の失敗**: 管理画面でチェックを元に戻し、エラーを表示する（3.6）
+- **システムエラー**: DBの読み書きの失敗 → 500。KVに印を付けないので再送できる
+- **設定漏れ**: Workerの `server_misconfigured` → 投票画面にエラーが出る。公開後の確認手順で必ず1票を実際に送り、設定漏れを見つける
+- **監視**: 当日は `npx wrangler tail` でWorkerのログを見られるようにしておく（手順書に記載）
 
 ## Testing Strategy
+テスト基盤は新設しない。以下を手動（ブラウザ・curl・CLI）で確認し、結果を tasks.md に記録する。
 
-### Default sections
-- Unit Tests: `mergeTeams`のupsertロジック（新規追加・既存更新・participating非上書き）、`validateRows`の`participating`列パース、Worker`getTeam`のteamId不正文字チェック
-- Integration Tests: CSV再取込後も既存参加フラグが保持されること、`/api/vote`のteamId検証→参加検証→永続化の一連の流れ、二重投票防止（KVあり/なし両方）
-- E2E/UI Tests: 管理画面でチェックボックスON→投票画面（別タブ再読み込み）に反映、投票受付ON/OFFの反映
-- 本specはテスト基盤（Jest等）を新設しないため、上記は`npm start`によるlocalStorageモードでの手動確認、および`wrangler dev`での手動確認として実施する
+- **Unit（Node で直接実行）**
+  - `seed`: 空のDBに対して48件・本戦12件が `participating: true`、候補36件が `false` で出力される（2.1・2.2・1.3）
+  - `seed` の再実行: 候補を1件 `true` にした `--current` を渡すと、そのチームの `participating`・`videoUrl`・`title` がパッチに含まれない（2.3）
+  - `seed`: 対応しない部門のNoと、存在しない本戦Noが標準エラーに出る（2.5）
+  - `videos`: `no,url` と `title,url` の両方で `videoUrl` だけが出力され、一致しない行とURLでない行が標準エラーに出る（12.1〜12.3）
+  - `rename`: `title` だけが出力される（12.4）
+- **Integration（`wrangler dev` + 本物のDB）**
+  - `database:update` で multi-path パッチを当てたとき、指定しない項目が消えない（2.3・12.2）
+  - `/api/vote`: 不正ID→400、候補で非表示→403、本戦で `participating: false` に書き換えても200（1.2）、正常→200かつ `votes` に1件増える、同じトークン→409（6.1〜6.4・7.1）
+  - `wrangler dev` を再起動した後も同じトークンが409になる（7.2）
+  - `.dev.vars` を外して起動すると500 `server_misconfigured`（11.4）
+  - 認証なしのREST: `DELETE /audienceApp/votes.json` と `GET /other.json` が拒否される（10.5）
+- **E2E（本番URL）**
+  - 投票画面に本戦12チームだけが「No.X 名称」の形で、部門ごとにNo順に出る（4.1・4.6・4.7）
+  - 管理画面で候補を1件ONにすると「表示中の敗者復活チーム」が1増え、投票画面を再読み込みすると13件になる。本戦の行にはチェックボックスがない（3.1〜3.5）
+  - 別々の端末2台で投票 → 管理画面の集計が2票になる。同じ端末の2回目は拒否される（5・6.4・7.1）
+  - 受付停止にするとフォームが無効になる（8.3）
+  - `/README.md`、`/worker.js`、`/docs/DEPLOY.md`、`/firebase.rules.json`、`/scripts/team-patch.mjs` が404で、配信するファイルに judge-app の文字列が含まれない（10.2）
+  - judge-app のルールが変わっていないこと（読み取りのみで確認）（10.3・10.4）
+- **Load**: 同時接続100は再現しない。投票画面を開いて読み込み後に、Firebase コンソールの「使用状況」で接続数が戻ることを確認する（13.1・13.2）
 
 ## Security Considerations
-- Firebase `apiKey`はブラウザ配布前提の公開情報であり、アクセス制御はセキュリティルールで行う（`teams`/`settings`書き込みの`auth != null`要件を`true`に緩和する判断は、匿名認証を追加しても実質的なセキュリティ向上にならないという前提に基づく）
-- `votes`の読み取りのみ`auth != null`を維持し、投票結果を投票中の一般来場者に見せない目的で使う
-- 管理者ログインはクライアントJSの単純比較のまま変更しないが、デモ用の`admin`/`admin123`は本番公開前に必ず変更する（Requirement 9）
-- Worker側のteamId検証で英数字・ハイフン・アンダースコア以外の文字を早期に拒否し、Firebase REST APIへの不正なパスインジェクションを防ぐ
+- 認証は使わない（決定事項）。その前提での対策は、「票の変更・削除の禁止（ルール）」「表示時のエスケープ」「judge-app を別プロジェクトにして露出させない」「非公開ファイルを配信しない」の4点
+- 管理画面の入室チェックは画面上の目隠しにすぎない。本番の前に `admin`/`admin123` から変更する（要件9。ユーザー指示により保留中）
+- Firebase の `apiKey` はブラウザに配布される前提の値。git には入れないが、秘密情報としては扱わない
+
+## Risks（実装前に解消が必要）
+- **デプロイ先の Cloudflare アカウントが未確定**: 現在の公開URLは大城さんのアカウント（`ry-oshiro.workers.dev`）にあり、この端末は Cloudflare にログインしていない。KV の作成・secret の設定・デプロイには、そのアカウントの権限が必要。別のアカウントに変える場合は公開URLが変わる
+- **本戦12チームのエントリーNo一覧が未入手**: `seed` の実行時に必要
+- **`database:update` の multi-path の挙動**: Firebase の REST API の PATCH は、キーにパスを含む multi-path 更新に対応している。CLI 経由でも同じになるかは、空のDBで最初に確認する。対応していない場合は、チームごとに `database:update /audienceApp/teams/entry-NN` を実行する形に切り替える
