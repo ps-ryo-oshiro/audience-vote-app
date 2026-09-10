@@ -5,12 +5,12 @@ const SECTION_LABELS = {
 };
 
 const DEFAULT_TEAMS = [
-  { id: 'team-life-1', title: 'ライフサポートアプリ', section: 'life', videoUrl: 'https://example.com/video/life' },
-  { id: 'team-life-2', title: '健康管理アプリ', section: 'life', videoUrl: 'https://example.com/video/health' },
-  { id: 'team-work-1', title: '業務効率化ツール', section: 'work', videoUrl: 'https://example.com/video/work' },
-  { id: 'team-work-2', title: 'コミュニケーション支援', section: 'work', videoUrl: 'https://example.com/video/comm' },
-  { id: 'team-local-1', title: '地域活性化アプリ', section: 'local', videoUrl: 'https://example.com/video/local' },
-  { id: 'team-local-2', title: 'まちのおすすめ案内', section: 'local', videoUrl: 'https://example.com/video/local2' }
+  { id: 'team-life-1', title: 'ライフサポートアプリ', section: 'life', videoUrl: 'https://example.com/video/life', participating: true },
+  { id: 'team-life-2', title: '健康管理アプリ', section: 'life', videoUrl: 'https://example.com/video/health', participating: true },
+  { id: 'team-work-1', title: '業務効率化ツール', section: 'work', videoUrl: 'https://example.com/video/work', participating: true },
+  { id: 'team-work-2', title: 'コミュニケーション支援', section: 'work', videoUrl: 'https://example.com/video/comm', participating: true },
+  { id: 'team-local-1', title: '地域活性化アプリ', section: 'local', videoUrl: 'https://example.com/video/local', participating: true },
+  { id: 'team-local-2', title: 'まちのおすすめ案内', section: 'local', videoUrl: 'https://example.com/video/local2', participating: true }
 ];
 
 const appState = {
@@ -126,14 +126,16 @@ async function readSettings(db) {
 
 async function readTeams(db) {
   if (!isFirebaseConfigured()) {
-    appState.teams = getLocalStorageData('teams', DEFAULT_TEAMS);
+    appState.teams = getLocalStorageData('teams', DEFAULT_TEAMS).filter((team) => team.participating === true);
     renderTeams();
     return;
   }
 
   const snapshot = await db.ref('audienceApp/teams').once('value');
   const teams = snapshot.val() || {};
-  appState.teams = Object.entries(teams).map(([id, team]) => ({ id, ...team }));
+  appState.teams = Object.entries(teams)
+    .map(([id, team]) => ({ id, ...team }))
+    .filter((team) => team.participating === true);
   renderTeams();
 }
 

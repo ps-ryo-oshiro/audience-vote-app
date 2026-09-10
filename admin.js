@@ -16,13 +16,19 @@ const adminState = {
   isOpen: true
 };
 
+const SECTION_LABELS = {
+  life: '🏡 ライフ部門',
+  work: '💼 ワーク部門',
+  local: '📍 ローカル部門'
+};
+
 const DEFAULT_TEAMS = [
-  { id: 'team-life-1', title: 'ライフサポートアプリ', section: 'life', videoUrl: 'https://example.com/video/life' },
-  { id: 'team-life-2', title: '健康管理アプリ', section: 'life', videoUrl: 'https://example.com/video/health' },
-  { id: 'team-work-1', title: '業務効率化ツール', section: 'work', videoUrl: 'https://example.com/video/work' },
-  { id: 'team-work-2', title: 'コミュニケーション支援', section: 'work', videoUrl: 'https://example.com/video/comm' },
-  { id: 'team-local-1', title: '地域活性化アプリ', section: 'local', videoUrl: 'https://example.com/video/local' },
-  { id: 'team-local-2', title: 'まちのおすすめ案内', section: 'local', videoUrl: 'https://example.com/video/local2' }
+  { id: 'team-life-1', title: 'ライフサポートアプリ', section: 'life', videoUrl: 'https://example.com/video/life', participating: true },
+  { id: 'team-life-2', title: '健康管理アプリ', section: 'life', videoUrl: 'https://example.com/video/health', participating: true },
+  { id: 'team-work-1', title: '業務効率化ツール', section: 'work', videoUrl: 'https://example.com/video/work', participating: true },
+  { id: 'team-work-2', title: 'コミュニケーション支援', section: 'work', videoUrl: 'https://example.com/video/comm', participating: true },
+  { id: 'team-local-1', title: '地域活性化アプリ', section: 'local', videoUrl: 'https://example.com/video/local', participating: true },
+  { id: 'team-local-2', title: 'まちのおすすめ案内', section: 'local', videoUrl: 'https://example.com/video/local2', participating: true }
 ];
 
 function showMessage(el, text, type) {
@@ -56,6 +62,47 @@ function getLocalStorageData(key, fallback) {
 
 function setLocalStorageData(key, value) {
   localStorage.setItem(`audienceApp:${key}`, JSON.stringify(value));
+}
+
+function makeTeamKey(section, title) {
+  return `${String(section).trim().toLowerCase()}::${String(title).trim().toLowerCase()}`;
+}
+
+function parseParticipatingFlag(value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return undefined;
+  }
+  return ['true', '1', 'on', 'yes'].includes(String(value).trim().toLowerCase());
+}
+
+function mergeTeams(existingTeams, rows) {
+  const result = existingTeams.map((team) => ({ ...team }));
+  const byKey = new Map(result.map((team) => [makeTeamKey(team.section, team.title), team]));
+
+  rows.forEach((row) => {
+    const key = makeTeamKey(row.section, row.title);
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.title = row.title;
+      existing.section = row.section;
+      existing.videoUrl = row.video_url;
+      if (row.participating !== undefined) {
+        existing.participating = row.participating;
+      }
+    } else {
+      const created = {
+        id: crypto.randomUUID ? crypto.randomUUID() : `uploaded-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        title: row.title,
+        section: row.section,
+        videoUrl: row.video_url,
+        participating: row.participating !== undefined ? row.participating : false
+      };
+      result.push(created);
+      byKey.set(key, created);
+    }
+  });
+
+  return result;
 }
 
 function ensureFirebase() {
@@ -111,11 +158,39 @@ function renderSummaryTable(teams, votes) {
 function renderGlobalResults(teams, votes) {
   const rows = teams.map((team) => {
     const count = votes.filter((vote) => vote.teamId === team.id).length;
-    return `<tr><td>${team.title}</td><td>${team.section}</td><td>${count}</td></tr>`;
+    return `<tr>
+      <td>${team.title}</td><td>${team.section}</td><td>${count}</td>
+      <td><input type="checkbox" class="participating-toggle" data-team-id="${team.id}" ${team.participating ? 'checked' : ''} /></td>
+    </tr>`;
   }).join('');
 
-  globalResultsBody.innerHTML = rows || '<tr><td colspan="3">データなし</td></tr>';
+  globalResultsBody.innerHTML = rows || '<tr><td colspan="4">データなし</td></tr>';
 }
+
+globalResultsBody.addEventListener('change', async (event) => {
+  const el = event.target;
+  if (!el.classList.contains('participating-toggle')) return;
+
+  const teamId = el.dataset.teamId;
+  const participating = el.checked;
+
+  try {
+    if (isFirebaseConfigured()) {
+      await ensureFirebase().ref(`audienceApp/teams/${teamId}/participating`).set(participating);
+    } else {
+      const teams = getLocalStorageData('teams', DEFAULT_TEAMS).map((team) =>
+        team.id === teamId ? { ...team, participating } : team
+      );
+      setLocalStorageData('teams', teams);
+    }
+
+    const team = adminState.teams.find((t) => t.id === teamId);
+    if (team) team.participating = participating;
+  } catch (error) {
+    console.error(error);
+    el.checked = !participating;
+  }
+});
 
 function determineWinner(teams, votes) {
   if (!teams.length) {
@@ -229,30 +304,26 @@ uploadForm.addEventListener('submit', async (event) => {
 
     if (isFirebaseConfigured()) {
       const db = ensureFirebase();
-      const teamMap = {};
-      for (const row of validation.rows) {
-        const key = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        teamMap[key] = {
-          title: row.title,
-          section: row.section,
-          videoUrl: row.video_url
-        };
-      }
+      const snapshot = await db.ref('audienceApp/teams').once('value');
+      const existingTeams = Object.entries(snapshot.val() || {}).map(([id, team]) => ({ id, ...team }));
+      const merged = mergeTeams(existingTeams, validation.rows);
 
-      await db.ref('audienceApp/teams').set(teamMap);
+      const updates = {};
+      merged.forEach((team) => {
+        updates[`audienceApp/teams/${team.id}`] = {
+          title: team.title,
+          section: team.section,
+          videoUrl: team.videoUrl,
+          participating: !!team.participating
+        };
+      });
+      await db.ref().update(updates);
     } else {
-      const storedTeams = getLocalStorageData('teams', DEFAULT_TEAMS);
-      const updatedTeams = [...storedTeams];
-      const newTeams = validation.rows.map((row, index) => ({
-        id: `uploaded-${Date.now()}-${index}`,
-        title: row.title,
-        section: row.section,
-        videoUrl: row.video_url
-      }));
-      setLocalStorageData('teams', [...updatedTeams, ...newTeams]);
+      const existingTeams = getLocalStorageData('teams', DEFAULT_TEAMS);
+      setLocalStorageData('teams', mergeTeams(existingTeams, validation.rows));
     }
 
-    showMessage(uploadMessage, `${validation.rows.length}件のデータを登録しました。`, 'success');
+    showMessage(uploadMessage, `${validation.rows.length}件のデータを取り込みました（新規登録・既存更新）。`, 'success');
     await fetchDashboardData();
   } catch (error) {
     console.error(error);
@@ -294,7 +365,8 @@ function validateRows(rows) {
     .map((row) => ({
       section: row.section,
       title: row.title,
-      video_url: row.video_url
+      video_url: row.video_url,
+      participating: parseParticipatingFlag(row.participating)
     }));
 
   if (!validRows.length) {
