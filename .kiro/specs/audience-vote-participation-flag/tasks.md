@@ -32,28 +32,28 @@
   - _Boundary: Voting Page (app.js)_
   - _Depends: 1.1_
 
-- [ ] 4. Firebase接続基盤の整合性確保
-- [ ] 4.1 Firebaseセキュリティルールのハイブリッド化
+- [x] 4. Firebase接続基盤の整合性確保
+- [x] 4.1 Firebaseセキュリティルールのハイブリッド化
   - `firebase.rules.json`の`teams`/`settings`の`.write`を`true`に緩和し、`votes`の`.read`は`auth != null`のまま維持する
   - 観測可能な完了条件: ルールファイルの内容がハイブリッド案（teams/settings書き込み自由、votes読み取りのみ認証必須）どおりになっている
   - _Requirements: 8.1_
 
-- [ ] 4.2 管理画面への匿名認証追加
+- [x] 4.2 管理画面への匿名認証追加
   - `admin.html`に`firebase-auth-compat.js`のscriptタグを追加する
   - `admin.js`のログイン処理（Firebase使用時）に`firebase.auth().signInAnonymously()`を追加し、失敗時はエラーメッセージを表示する
   - 観測可能な完了条件: Firebase接続時に管理者ログインが成功し、`votes`の読み取り（集計表示）が可能になる
   - _Requirements: 8.1_
   - _Depends: 4.1_
 
-- [ ] 5. 投票API（Worker）の検証・永続化強化
-- [ ] 5.1 (P) チーム実在・参加状態の検証
+- [x] 5. 投票API（Worker）の検証・永続化強化
+- [x] 5.1 (P) チーム実在・参加状態の検証
   - `worker.js`に`getTeam(env, teamId)`関数を新設し、teamIdの文字種チェック・Firebase RTDBからの実在確認を行う
   - `/api/vote`ハンドラに、二重投票チェック通過後の位置でteamId不在時400・参加状態OFF時403を返す分岐を追加する
   - 観測可能な完了条件: 存在しないteamIdへのPOSTが400 `invalid_team`、参加フラグOFFのチームへのPOSTが403 `team_not_participating`を返す
   - _Requirements: 6.1, 6.2, 6.3_
   - _Boundary: Voting API (worker.js)_
 
-- [ ] 5.2 (P) 投票データの永続化
+- [x] 5.2 (P) 投票データの永続化
   - `worker.js`に`recordVote(env, teamId, voterToken)`関数を新設し、検証を通過した投票をFirebase RTDB REST API経由で`audienceApp/votes`へPOSTする
   - KVへの投票済みフラグ書き込みは、この永続化が成功した後に行う
   - 観測可能な完了条件: 有効な投票後、`audienceApp/votes`に新しいレコード（teamId, voterToken, votedAt）が作成される
@@ -77,6 +77,7 @@
   - _Depends: 4.1, 4.2_
 
 - [ ] 6.3 管理者パスワードの変更
+  - _保留: ユーザー指示により一旦 `admin`/`admin123` のまま。本番公開（7.3）前に必ず変更すること_
   - `firebase-config.js`の`audienceDemoAdmin`の値を、当日限りの推測困難な値に変更する
   - 観測可能な完了条件: 旧デモパスワード（`admin`/`admin123`）でのログインが拒否される
   - _Requirements: 9.1, 9.2_

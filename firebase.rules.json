@@ -5,7 +5,7 @@
     "audienceApp": {
       "teams": {
         ".read": true,
-        ".write": "auth != null"
+        ".write": true
       },
       "votes": {
         ".read": "auth != null",
@@ -13,7 +13,7 @@
       },
       "settings": {
         ".read": true,
-        ".write": "auth != null"
+        ".write": true
       }
     }
   }

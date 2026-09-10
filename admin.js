@@ -276,6 +276,17 @@ adminLoginForm.addEventListener('submit', async (event) => {
     return;
   }
 
+  if (isFirebaseConfigured()) {
+    try {
+      ensureFirebase();
+      await firebase.auth().signInAnonymously();
+    } catch (error) {
+      console.error(error);
+      showMessage(loginMessage, '匿名認証が無効です。Firebase Consoleで有効化してください。', 'error');
+      return;
+    }
+  }
+
   adminState.loggedIn = true;
   loginPanel.classList.add('hidden');
   dashboardPanel.classList.remove('hidden');
