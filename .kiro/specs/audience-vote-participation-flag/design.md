@@ -105,9 +105,10 @@ graph TB
 ### Directory Structure
 ```
 audience-vote-app/
-├── index.html / app.js          # 投票画面（配信する）
+├── index.html / app.js          # 投票画面（配信する。2026-09-10 のデザイン刷新版）
+├── vote.css                     # 投票画面専用のスタイル（配信する。デザイン刷新で追加）
 ├── admin.html / admin.js        # 管理画面（配信する）
-├── style.css                    # 共通スタイル（配信する）
+├── style.css                    # 管理画面のスタイル（配信する）
 ├── firebase-config.js           # 接続値・入室ID（git管理外・配信する）
 ├── firebase-config.example.js   # 新規: 接続設定のひな形（配信しない）
 ├── worker.js                    # Voting API（配信しない）
@@ -125,14 +126,14 @@ audience-vote-app/
 登録作業の中間ファイル（judge-app から読み取ったJSON、現在のチーム一覧、生成したパッチ）は、リポジトリの外（`06.コンテスト/work/`）に置く。
 
 ### Modified / New Files
-- `app.js` — 表示判定を `isVisibleTeam()` に置き換える。部門ごとに `entryNo` の昇順で並べる。「No.{entryNo} {title}」と表示する。動画URLが `^https?://` のときだけリンクを出す。チーム名はエスケープする。投票データの読み込みを削除する。読み込み後に `firebase.database().goOffline()` する。読み込み失敗時は再読み込みを促す。デモ用の `DEFAULT_TEAMS` に `entryNo`・`finalist` を追加する
-- `admin.js` — CSV取込の関連コードをすべて削除する（`makeTeamKey`・`parseParticipatingFlag`・`mergeTeams`・`readUploadFile`・`validateRows`・uploadのハンドラ）。匿名認証を削除する。全体集計の表を「No・アプリ名・部門・区分・得票数・表示」の列にし、本戦→敗者復活候補の順、各区分内はNo順で並べる。本戦の行は「本戦（常に表示）」と表示してチェックボックスを出さない。表示中の敗者復活候補の数を表示し、切替のたびに更新する。保存に失敗したら、チェックを戻してメッセージを出す。チーム名はエスケープする。`DEFAULT_TEAMS` を `app.js` と揃える
-- `admin.html` — アップロード欄（`#upload-panel`）、xlsx.js、`firebase-auth-compat.js` を削除する。全体集計の表の見出しを6列にする。表示中の数とエラーメッセージの表示欄を追加する
+- `app.js` — （デザイン刷新版をベースにする。既存の `escapeHtml`・`safeVideoUrl` を活かす）表示判定を `isVisibleTeam()` に置き換える。部門ごとに `entryNo` の昇順で並べる。「No.{entryNo} {title}」と表示する。動画URLが http(s) でないとき（未設定を含む）は VIDEO リンクの要素自体を出さない。投票データの読み込みを削除する。読み込み後に `firebase.database().goOffline()` する。読み込み失敗時は再読み込みを促す。デモ用の `DEFAULT_TEAMS` に `entryNo`・`finalist` を追加する
+- `admin.js` — CSV取込の関連コードをすべて削除する（`makeTeamKey`・`parseParticipatingFlag`・`mergeTeams`・`readUploadFile`・`validateRows`・uploadのハンドラ）。匿名認証を削除する。一度きりの読み込み（`fetchDashboardData`）を、`teams`・`votes`・`settings` の購読に置き換える。集計（オーディエンス賞候補・同票・未判定・順位付きの全体集計・総票数・部門別）と表示切替（本戦一覧・候補のチェックボックス・表示中の数・失敗時に戻す）を、別々の描画関数に分ける。チーム名はエスケープする。`DEFAULT_TEAMS` を `app.js` と揃える
+- `admin.html` — アップロード欄（`#upload-panel`）、xlsx.js、`firebase-auth-compat.js` を削除する。「集計」パネル（オーディエンス賞候補・総票数・順位付きの全体集計・部門別）と、「表示切替」パネル（本戦一覧・候補一覧・表示中の数・エラーメッセージの表示欄）に分ける
 - `worker.js` — 表示判定を `isVisibleTeam()` にする。`FIREBASE_DB_URL` か `AUDIENCE_VOTES` が欠けていれば500 `server_misconfigured` を返す。メモリ上のフォールバックを削除する。JSONの解析エラーとそれ以外のエラーを区別する
 - `firebase.rules.json` — 下の「Data Contracts」のルールに置き換える
 - `firebase.json`（新規） — `{ "database": { "rules": "firebase.rules.json" } }`
-- `wrangler.jsonc` — `kv_namespaces` に `AUDIENCE_VOTES` を追加する。`FIREBASE_DB_URL` は書かない（secret で渡す）
-- `.assetsignore`（新規） — 許可リスト方式: `*` の後に `!index.html` `!admin.html` `!app.js` `!admin.js` `!style.css` `!firebase-config.js`
+- `wrangler.jsonc` — `kv_namespaces` に `AUDIENCE_VOTES` を追加する。`FIREBASE_DB_URL` は書かない（secret で渡す）。`assets.not_found_handling: "single-page-application"` を削除する（この画面はクライアント側のルーティングを使わない。SPAの設定のままだと、配信から外したパスや存在しない `firebase-config.js` が `index.html` として200で返る）
+- `.assetsignore`（新規） — 許可リスト方式: `*` の後に `!index.html` `!admin.html` `!app.js` `!admin.js` `!style.css` `!vote.css` `!firebase-config.js`（7ファイル）
 - `.gitignore` — `firebase-config.js` と `.dev.vars` を追加する。`firebase-config.js` は `git rm --cached` で管理から外す
 - `firebase-config.example.js`（新規） — 項目名とプレースホルダーだけを書く（`audienceDemoAdmin` も含む）
 - `scripts/team-patch.mjs`（新規） — 下の「Team Patch Script」を参照
@@ -202,7 +203,11 @@ flowchart LR
 | 4.4 | 動画URLがなければリンクを出さない | Voting Page | `renderTeams` | - |
 | 4.5 | ログインなしで投票 | Voting Page, Voting API | `POST /api/vote` | 投票受付 |
 | 4.6, 4.7 | エントリーNoを表示し、No順に並べる | Voting Page | `renderTeams` | - |
-| 5.1, 5.2 | 全チームの集計と最多得票の提示 | Admin Dashboard | `renderSummaryTable`、`renderGlobalResults`、`determineWinner` | - |
+| 5.1, 5.2 | 全チームの集計と、全体で1チームの最多得票の提示 | Admin Dashboard | 集計パネルの描画 | - |
+| 5.3, 5.4 | 同票の明示、票0件は未判定 | Admin Dashboard | オーディエンス賞候補の判定 | - |
+| 5.5 | 得票順の順位と総票数 | Admin Dashboard | 全体集計の描画 | - |
+| 5.6 | 再読み込みなしの反映 | Admin Dashboard | `teams`・`votes`・`settings` の `on('value')` | - |
+| 5.7 | 集計と表示切替の領域を分ける | Admin Dashboard | 集計パネル／表示切替パネル | - |
 | 6.1, 6.2, 6.3 | チームの実在・表示状態の検証 | Voting API | `getTeam`、`isVisibleTeam()` | 投票受付 |
 | 6.4 | 票の保存 | Voting API | `recordVote` | 投票受付 |
 | 7.1, 7.2 | 二重投票の拒否、再起動をまたいで保持 | Voting API | KV `AUDIENCE_VOTES` | 投票受付 |
@@ -266,18 +271,25 @@ function isVisibleTeam(team: Partial<Team> | null): boolean {
 
 | Field | Detail |
 |-------|--------|
-| Intent | 入室チェック、敗者復活候補の表示切替、集計表示、受付のON/OFF |
-| Requirements | 1.2, 2.6, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 5.1, 5.2, 8.1, 8.2, 9.1, 9.2 |
+| Intent | 入室チェック、敗者復活候補の表示切替、集計のライブ表示、受付のON/OFF |
+| Requirements | 1.2, 2.6, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 8.1, 8.2, 9.1, 9.2 |
 
 **Responsibilities & Constraints**
 - 入室は `firebase-config.js` の `audienceDemoAdmin` との文字列比較だけで判定する。Firebase Authentication は呼ばない
-- 全体集計の表（No・アプリ名・部門・区分・得票数・表示）は、本戦の行を先に、続けて敗者復活候補の行を、それぞれNo順に並べる
-  - 本戦の行: 区分「本戦」、表示の列は「常に表示」（チェックボックスなし）
-  - 候補の行: 区分「敗者復活」、表示の列はチェックボックス
-- 表の上に「表示中の敗者復活チーム: n / 候補数」を出し、切替のたびに更新する
-- 切替時は `audienceApp/teams/{id}/participating` だけを `set()` する。失敗したらチェックを元に戻し、`#participation-message` にエラーを出す
-- 集計は表示状態にかかわらず全チームを対象にする。最多得票のチームを優勝候補として示す（同数なら表の並びで先のチーム）
+- 画面は「集計」パネルと「表示切替」パネルに分ける（5.7）
+- **データの購読**: 入室後、`teams`・`votes`・`settings` を `on('value')` で購読する（5.6）。変化があるたびに、集計パネルと受付ボタンの表示を描き直す。管理画面を開く端末は数台なので、同時接続の上限（13.2）には影響しない
+- **集計パネル**（票が入るたびに描き直す）
+  - オーディエンス賞候補: 全部門を通じた最多得票のチーム。最多が複数なら「同票」と明示して該当チームをすべて並べる（5.3）。票が0件なら「未判定」（5.4）
+  - 全体集計: 総票数と、得票数の多い順に順位を付けた全チームの一覧（順位・No・アプリ名・部門・得票数）。同数は同順位とし、次の順位は飛ばす（1位, 1位, 3位）。同数内はNo順（5.5）
+  - 部門別集計: 部門ごとに、得票数の多い順（同数はNo順）でチームと得票数を並べる（5.1）
+  - どのチームにも一致しない `teamId` の票は、チームの得票には数えない（総票数には含め、「集計対象外 n票」として示す）
+- **表示切替パネル**（票の変化では描き直さない）
+  - 本戦の一覧（No順・「常に表示」、切替なし）と、敗者復活候補の一覧（No順・チェックボックス）を分けて示す（3.1・3.2）
+  - 「表示中の敗者復活チーム: n / 候補数」を示し、表示状態が変わるたびに更新する（3.3）
+  - `teams` の変化を受けたら、チームの顔ぶれ・名称・並びが変わったときだけ一覧を組み直し、それ以外はチェック状態と表示中の数だけを更新する（操作中のチェックの位置が動かないようにする）
+  - 切替時は `audienceApp/teams/{id}/participating` だけを `set()` する。失敗したらチェックを元に戻し、`#participation-message` にエラーを出す（3.6）
 - チーム名は `escapeHtml` を通して描画する。部門は `SECTION_LABELS` で日本語にして表示する
+- デモモード（Firebase 未設定）では購読の代わりに、入室時と操作のたびに、ブラウザ内のデータから描き直す
 
 #### Voting Page（`app.js`）
 
@@ -289,7 +301,8 @@ function isVisibleTeam(team: Partial<Team> | null): boolean {
 **Responsibilities & Constraints**
 - 起動時に `settings` と `teams` だけを読み、描画した後に `goOffline()` する。`votes` は読まない
 - `isVisibleTeam()` が真のチームだけを、部門ごとに `entryNo` の昇順で「No.{entryNo} {title}」と表示する（`entryNo` がなければタイトルだけ）
-- 動画URLは `^https?://` に一致するときだけリンクとして描画する
+- 動画URLは http(s) のときだけ VIDEO リンクとして描画し、それ以外（未設定を含む）はリンクの要素を出さない
+- デザイン刷新版の見た目（テーマ切替・送信演出・完了オーバーレイ）とデータ層の境界は維持し、本仕様の変更はデータの読み込み・絞り込み・並び・カードの表示内容に限る
 - 読み込みに失敗したら「読み込みに失敗しました。ページを再読み込みしてください。」を表示する
 
 ### Worker
@@ -328,6 +341,7 @@ function isVisibleTeam(team: Partial<Team> | null): boolean {
   - 部門の対応: `ライフ部門`→`life`、`ワーク部門`→`work`、`ローカル部門`→`local`。対応しない行は出力せず、Noを標準エラーに出す（2.5）
   - 新規チーム（`--current` にないID）: `entryNo`・`title`・`section`・`finalist`・`participating`（本戦は `true`、候補は `false`）・`videoUrl: ""` を出力する
   - 既存チーム: `finalist` と、本戦の場合の `participating: true` だけを出力する（2.3。当日の切替・動画URL・名称の修正を保つ）
+  - 既存チームが本戦から外れた場合（`--current` で `finalist: true`、今回の `--finalists` に含まれない）: `finalist: false` と `participating: false` を出力し、非表示に戻す。外したチームのNoは標準エラーに出して知らせる
   - `--finalists` に judge-app に存在しないNoがあれば、パッチを出力せずに終了コード1で止める（2.5）。件数が12でなければ警告を出す（処理は続ける）
 - `videos --file <csv> --current <file>`
   - 入力CSVの見出しは `no,url` または `title,url`。`title` は前後の空白を除いて完全一致で照合する
@@ -393,6 +407,7 @@ function isVisibleTeam(team: Partial<Team> | null): boolean {
 - **Unit（Node で直接実行）**
   - `seed`: 空のDBに対して48件・本戦12件が `participating: true`、候補36件が `false` で出力される（2.1・2.2・1.3）
   - `seed` の再実行: 候補を1件 `true` にした `--current` を渡すと、そのチームの `participating`・`videoUrl`・`title` がパッチに含まれない（2.3）
+  - `seed` の再実行で本戦から外したチーム: `finalist: false` と `participating: false` が出力され、標準エラーにNoが出る（1.3・2.2）
   - `seed`: 対応しない部門のNoと、存在しない本戦Noが標準エラーに出る（2.5）
   - `videos`: `no,url` と `title,url` の両方で `videoUrl` だけが出力され、一致しない行とURLでない行が標準エラーに出る（12.1〜12.3）
   - `rename`: `title` だけが出力される（12.4）
@@ -404,7 +419,9 @@ function isVisibleTeam(team: Partial<Team> | null): boolean {
   - 認証なしのREST: `DELETE /audienceApp/votes.json` と `GET /other.json` が拒否される（10.5）
 - **E2E（本番URL）**
   - 投票画面に本戦12チームだけが「No.X 名称」の形で、部門ごとにNo順に出る（4.1・4.6・4.7）
-  - 管理画面で候補を1件ONにすると「表示中の敗者復活チーム」が1増え、投票画面を再読み込みすると13件になる。本戦の行にはチェックボックスがない（3.1〜3.5）
+  - 管理画面で候補を1件ONにすると「表示中の敗者復活チーム」が1増え、投票画面を再読み込みすると13件になる。本戦の一覧にはチェックボックスがない（3.1〜3.5）
+  - 管理画面を開いたまま別の端末で投票すると、再読み込みなしで総票数・順位・オーディエンス賞候補が更新され、表示切替パネルのチェックの位置は動かない（5.5〜5.7）
+  - 2チームを同数にすると「同票」と両チームが表示され、票が0件なら「未判定」と表示される（5.3・5.4）
   - 別々の端末2台で投票 → 管理画面の集計が2票になる。同じ端末の2回目は拒否される（5・6.4・7.1）
   - 受付停止にするとフォームが無効になる（8.3）
   - `/README.md`、`/worker.js`、`/docs/DEPLOY.md`、`/firebase.rules.json`、`/scripts/team-patch.mjs` が404で、配信するファイルに judge-app の文字列が含まれない（10.2）
@@ -415,6 +432,10 @@ function isVisibleTeam(team: Partial<Team> | null): boolean {
 - 認証は使わない（決定事項）。その前提での対策は、「票の変更・削除の禁止（ルール）」「表示時のエスケープ」「judge-app を別プロジェクトにして露出させない」「非公開ファイルを配信しない」の4点
 - 管理画面の入室チェックは画面上の目隠しにすぎない。本番の前に `admin`/`admin123` から変更する（要件9。ユーザー指示により保留中）
 - Firebase の `apiKey` はブラウザに配布される前提の値。git には入れないが、秘密情報としては扱わない
+
+## 並行作業との調整
+- 投票画面（`index.html`・`app.js`・`vote.css`）は、デザイン刷新のために別セッションが同じブランチで編集している。本仕様の投票画面の改修は、そのセッションの作業が終わってから行う
+- コミットは、各セッションが自分の変更したファイルだけをパス指定で行う（`git add -A` などで他のセッションの変更を巻き込まない）
 
 ## Risks（実装前に解消が必要）
 - **デプロイ先の Cloudflare アカウントが未確定**: 現在の公開URLは大城さんのアカウント（`ry-oshiro.workers.dev`）にあり、この端末は Cloudflare にログインしていない。KV の作成・secret の設定・デプロイには、そのアカウントの権限が必要。別のアカウントに変える場合は公開URLが変わる

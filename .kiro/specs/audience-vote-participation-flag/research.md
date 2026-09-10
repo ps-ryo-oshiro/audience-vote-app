@@ -107,3 +107,88 @@
 
 ## References
 - [Cloudflare Workers Static Assets — .assetsignore](https://developers.cloudflare.com/workers/static-assets/binding/) — 配信対象から外すファイルの指定方法
+
+---
+
+# Gap Analysis（2026-09-10 20:00 時点のコード）
+
+## 分析の前提
+- 対象のコード: HEAD `04dce0f`（投票画面のデザイン刷新）に、別セッションで作業中の未コミット差分（`app.js` の `safeVideoUrl`）を加えた状態
+- 投票画面（`index.html`・`app.js`・新規 `vote.css`）は、デザイン刷新のために別セッションが並行して編集中。管理画面（`admin.js`・`admin.html`）と `worker.js` は、コミット `fb06b4a` 以降変更されていない
+- steering（`.kiro/steering/`）は未作成。本分析はコードと spec だけを根拠にしている
+
+## Current State
+| 領域 | ファイル | 現状 |
+|------|----------|------|
+| 投票画面 | `app.js`（451行）、`index.html`、`vote.css`（新規・708行） | テーマ切替・送信演出・完了オーバーレイ付きの新デザイン。データ層（Firebase/localStorage 切替、`/api/vote`、409判定）は旧実装を踏襲。`escapeHtml` あり。動画URLは `safeVideoUrl` で http(s) 以外を `#` にする（リンク自体は常に出す）。表示判定は `participating === true` だけ。票を読み込んでいる。接続は張ったまま。Google Fonts を外部から読み込む |
+| 管理画面 | `admin.js`（388行）、`admin.html`、`style.css` | CSV/Excel取込（`mergeTeams`・`validateRows`・xlsx.js）、匿名認証、参加チェックボックス（全チーム対象）が残っている。チーム名はエスケープしていない |
+| 投票API | `worker.js`（78行） | チームの検証と票の保存は実装済み。`FIREBASE_DB_URL` 未設定時は検証・保存をスキップして200、KV未設定時はメモリ上の Map。表示判定は `participating !== true` で403 |
+| 設定 | `wrangler.jsonc` | `assets.directory: "./"`、`not_found_handling: "single-page-application"`。KV binding なし |
+| 設定 | `firebase-config.js`（git管理下）、`firebase.rules.json`（匿名認証前提のハイブリッド案） | どちらも設計どおりの形になっていない |
+| 登録手段 | なし | judge-app からの変換・登録の仕組みはない |
+
+## Requirement-to-Asset Map
+
+| 要件 | 対応する資産 | ギャップ |
+|------|--------------|----------|
+| 1.1 項目の保持 | チームデータ | **Missing**: `entryNo`・`finalist` がない |
+| 1.2 本戦は常に表示 | `app.js` `readTeams`、`worker.js`、`admin.js` | **Missing**: 3か所とも `participating` だけで判定している |
+| 1.3, 1.4 初期値・未設定 | `app.js` のフィルタ（`=== true`） | 1.4 は充足。1.3 は登録スクリプトがないため **Missing** |
+| 2.1〜2.5 事前一括登録 | なし | **Missing**: 登録スクリプト全体 |
+| 2.6 取込機能を置かない | `admin.js`・`admin.html` の取込 | **Missing**（削除が必要） |
+| 3.1〜3.6 候補の表示切替 | `admin.js` のチェックボックス（全チーム） | **Missing**: 本戦と候補の区別、表示中の数、失敗時のメッセージ。即時反映（3.4）・保存（3.5）・失敗時にチェックを戻す処理は既存 |
+| 4.1〜4.3 表示の絞り込み | `app.js` | 充足（ただし 1.2 の判定変更が必要） |
+| 4.4 動画URLがなければリンクを出さない | `app.js` `safeVideoUrl` | **Missing**: URLがなくても VIDEO リンクを `#` で出す |
+| 4.5 ログインなし | `app.js`・`worker.js` | 充足 |
+| 4.6, 4.7 No表示・No順 | `app.js` `renderTeams` | **Missing** |
+| 5.1, 5.2 集計 | `admin.js` | 充足 |
+| 6.1〜6.4 検証と保存 | `worker.js` | 充足。ただし設定漏れ時に黙って成功する（11.4 の **Constraint**） |
+| 7.1, 7.2 二重投票 | `worker.js` | **Missing**: KV binding がなく、メモリ上の Map に落ちる |
+| 8.1, 8.2 認証なしの管理操作 | `admin.js`、`firebase.rules.json` | **Missing**: 匿名認証と、それを前提としたルールが残っている |
+| 8.3 受付停止時の無効化 | `app.js` `isLocked` | 充足 |
+| 9.1, 9.2 入室ID | `admin.js`、`firebase-config.js` | 9.2 は充足。9.1 は保留中（ユーザー指示） |
+| 10.1, 10.5 専用DBとルール | `firebase.rules.json` | **Missing**: 専用DBのルールを未反映（ロックモードのまま） |
+| 10.2 配布物に judge-app の所在を含めない | `wrangler.jsonc` | **Constraint**: リポジトリ直下を全部配信している。SPAの設定のため、除外したパスも404ではなく `index.html` を返す |
+| 10.3, 10.4 judge-app を変えない | 運用 | 手順書がない |
+| 11.1〜11.3 接続値の管理 | `firebase-config.js` | **Missing**: git管理下にある。ひな形がない。Worker の secret が未設定 |
+| 11.4 Worker と同じDB | `worker.js` | **Constraint**: 設定漏れ時に黙って成功する |
+| 11.5 設定がなければデモモード | `isFirebaseConfigured` | 充足（`wrangler dev` では、SPAの設定のため `firebase-config.js` が `index.html` として返り、コンソールにエラーが出る） |
+| 12.1〜12.4 追記・修正 | なし | **Missing** |
+| 13.1, 13.2 常時接続を持たない | `app.js` | **Missing**: 票を読み込み、接続も張ったまま |
+| 13.3 読み込み失敗時の案内 | `app.js` 起動時の `catch` | **Missing**: 例外メッセージをそのまま出す（再読み込みの案内がない） |
+
+## 設計（design.md）に反映が必要な差分
+1. **配信の許可リストに `vote.css` がない**: デザイン刷新で追加された。許可リストが6ファイルのままだと、本番で投票画面のスタイルが消える
+2. **`not_found_handling: "single-page-application"`**: 除外したパスや存在しない `firebase-config.js` が `index.html`（200）として返る。この画面はクライアント側のルーティングを使っていないので、設定を外して404を返すのが素直
+3. **本戦から外れたチームの扱い**: `seed` を再実行して本戦から外したチームは、`finalist: false` だけが書かれ、`participating: true` が残って表示され続ける。外すときは `participating: false` も書く必要がある
+4. **動画リンクの扱い**: 刷新後の画面は `safeVideoUrl` で `#` を返してリンクを常に出す。要件4.4に合わせて、URLがなければリンク自体を出さないようにする必要がある
+5. **投票画面のファイル構成**: design の File Structure Plan に `vote.css` を加え、`style.css` は管理画面だけのスタイルになったことを記す
+
+## Implementation Approach Options
+
+### Option A: 既存ファイルの拡張だけで対応する
+- 登録もスクリプトを作らず、手でJSONを書いて `database:update` する
+- ✅ 新規ファイルが最少
+- ❌ 48件の手作業による転記ミス（要件2の目的に反する）。本戦から外したときの状態の直し漏れが起きやすい
+
+### Option B: 登録・配信・設定の仕組みを新規ファイルで分ける（design の現行方針）
+- 画面と API は既存ファイルを直し、登録スクリプト・`.assetsignore`・ひな形・`firebase.json` を追加する
+- ✅ 役割が分かれ、登録の再実行や追記を安全に行える
+- ❌ 追加ファイルが5つ（うち1つは手順書）
+
+### Option C: 投票画面を刷新セッションの完了後にまとめて直す（B の実施順序の変形）
+- 管理画面・Worker・設定・登録スクリプトを先に進め、投票画面（`app.js`）の改修は、デザイン刷新のセッションが終わってから行う
+- ✅ 同じファイルを2つのセッションが同時に編集して衝突するのを避けられる
+- ❌ 投票画面の改修（1.2・4.4・4.6・4.7・13）が後ろにずれ、結合確認がその分遅れる
+
+## Effort / Risk
+- **Effort: S（1〜3日）** — 既存パターンの延長で、新しい外部依存はない。変更は画面2つ・Worker・設定・小さなスクリプト
+- **Risk: Medium** — 技術的には既知の範囲だが、(1) 期限が2日後、(2) 投票画面を別セッションが同時に編集中、(3) 本戦No一覧と Cloudflare アカウントという外部の前提が未解決
+
+## Recommendations
+- 方針は Option B（design の現行方針）のまま。実施順序は Option C を取り、`app.js`・`index.html`・`vote.css` には、デザイン刷新のセッションが作業を終えてから触る
+- 上の「設計に反映が必要な差分」1〜5を design.md に反映してから、タスク表を確定する
+- **Research Needed**:
+  - `firebase database:update` での multi-path パッチの挙動（空のDBで最初に確認する）
+  - `.assetsignore` の否定パターン（`!file`）が Wrangler で期待どおり効くか（`wrangler dev` で確認する）
+  - `not_found_handling` を外したときに、`/` が `index.html` を返すこと（Static Assets の既定の挙動）
