@@ -1,7 +1,9 @@
-const VOTE_STORE = globalThis.__AUDIENCE_VOTES__ || (globalThis.__AUDIENCE_VOTES__ = new Map());
+/* 表示判定。3か所で揃える判定規則。app.js・admin.js・worker.js で同じ内容にすること */
+function isVisibleTeam(team) {
+  return !!team && (team.finalist === true || team.participating === true);
+}
 
 async function getTeam(env, teamId) {
-  if (!env.FIREBASE_DB_URL) return undefined;
   if (!/^[A-Za-z0-9_-]+$/.test(teamId)) return null;
 
   const res = await fetch(`${env.FIREBASE_DB_URL}/audienceApp/teams/${teamId}.json`);
@@ -10,8 +12,6 @@ async function getTeam(env, teamId) {
 }
 
 async function recordVote(env, teamId, voterToken) {
-  if (!env.FIREBASE_DB_URL) return;
-
   const res = await fetch(`${env.FIREBASE_DB_URL}/audienceApp/votes.json`, {
     method: 'POST',
     body: JSON.stringify({ teamId, voterToken, votedAt: Date.now() })
@@ -33,14 +33,14 @@ export default {
           return Response.json({ error: 'invalid_request' }, { status: 400 });
         }
 
+        if (!env.FIREBASE_DB_URL || !env.AUDIENCE_VOTES) {
+          return Response.json({ error: 'server_misconfigured' }, { status: 500 });
+        }
+
         const voteKey = `voter:${voterToken}`;
 
-        if (env.AUDIENCE_VOTES) {
-          const existing = await env.AUDIENCE_VOTES.get(voteKey);
-          if (existing === '1') {
-            return Response.json({ error: 'already_voted' }, { status: 409 });
-          }
-        } else if (VOTE_STORE.has(voteKey)) {
+        const existing = await env.AUDIENCE_VOTES.get(voteKey);
+        if (existing === '1') {
           return Response.json({ error: 'already_voted' }, { status: 409 });
         }
 
@@ -48,17 +48,13 @@ export default {
         if (team === null) {
           return Response.json({ error: 'invalid_team' }, { status: 400 });
         }
-        if (team && team.participating !== true) {
+        if (!isVisibleTeam(team)) {
           return Response.json({ error: 'team_not_participating' }, { status: 403 });
         }
 
         await recordVote(env, teamId, voterToken);
 
-        if (env.AUDIENCE_VOTES) {
-          await env.AUDIENCE_VOTES.put(voteKey, '1', { expirationTtl: 60 * 60 * 24 * 30 });
-        } else {
-          VOTE_STORE.set(voteKey, '1');
-        }
+        await env.AUDIENCE_VOTES.put(voteKey, '1', { expirationTtl: 60 * 60 * 24 * 30 });
 
         return Response.json({ ok: true, teamId, voterToken });
       } catch (error) {
