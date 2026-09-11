@@ -387,8 +387,21 @@ function setLoaderVisible(visible) {
 
 /* ---------------- 投票完了オーバーレイ ---------------- */
 
+/* 受付中は何度でもやり直せる。
+   受付状態の判定は、締め切り後に画面を開き直した場合に備えた防御で、サーバー側の拒否と二重で機能する */
+function canRedo() {
+  return appState.isOpen;
+}
+
 function showDoneOverlay(title) {
   if (document.querySelector('.done-overlay')) return;
+
+  const redoBlock = canRedo()
+    ? `<div class="done-redo">
+          <button type="button" class="done-redo__btn" id="vote-redo">投票をやり直す</button>
+          <span class="done-redo__note">受付中は何度でも選び直せます</span>
+        </div>`
+    : '';
 
   const overlay = document.createElement('div');
   overlay.className = 'done-overlay';
@@ -411,11 +424,32 @@ function showDoneOverlay(title) {
           <span class="done-card__label">YOUR VOTE</span>
           <span class="done-card__value">${escapeHtml(title)}</span>
         </div>
+        ${redoBlock}
       </div>
     </div>
     <span class="done-overlay__band done-overlay__band--bottom" aria-hidden="true"></span>`;
 
   document.body.appendChild(overlay);
+
+  const redoButton = overlay.querySelector('#vote-redo');
+  if (redoButton) redoButton.addEventListener('click', enterRedoMode);
+}
+
+function removeDoneOverlay() {
+  document.querySelector('.done-overlay')?.remove();
+}
+
+/* やり直し: 完了画面を閉じ、未投票と同じ操作可能状態に戻す。
+   voterToken は再生成しない（再生成すると前の票を無効化できず票数が増えてしまう） */
+function enterRedoMode() {
+  removeDoneOverlay();
+  localStorage.removeItem(VOTE_SUBMITTED_KEY);
+  appState.hasVoted = false;
+  appState.selectedId = null;
+  appState.phase = PHASE.IDLE;
+  hideMessage();
+  updateVoteStatus();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 /* 送信成功時の演出。呼び出し側で phase = SENDING にした後に呼ぶ。ローディング → 完了オーバーレイ */
@@ -519,9 +553,11 @@ voteForm.addEventListener('submit', async (event) => {
       const payload = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        if (response.status === 409 || payload.error === 'already_voted') {
+        /* 403 は受付終了と表示対象外チームの双方で使うため、ステータスではなくエラーコードで分岐する */
+        if (payload.error === 'voting_closed') {
           localStorage.setItem(VOTE_SUBMITTED_KEY, 'true');
-          applyVotedUiState('この端末ではすでに投票済みです。');
+          appState.isOpen = false;
+          applyVotedUiState('投票受付は終了しました。直前の投票が有効です。');
           return;
         }
         throw new Error(payload.error || '投票の受付に失敗しました。');
@@ -533,11 +569,6 @@ voteForm.addEventListener('submit', async (event) => {
     }
 
     const votes = getLocalStorageData('votes', []);
-    if (votes.some((vote) => vote.voterToken === voterToken)) {
-      localStorage.setItem(VOTE_SUBMITTED_KEY, 'true');
-      applyVotedUiState('この端末ではすでに投票済みです。');
-      return;
-    }
     votes.push({ teamId, voterToken, votedAt: Date.now() });
     setLocalStorageData('votes', votes);
     localStorage.setItem(VOTE_SUBMITTED_KEY, 'true');
