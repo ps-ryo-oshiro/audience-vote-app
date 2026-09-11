@@ -130,7 +130,7 @@
   - 完了状態: 専用DBに48チームが登録され、本戦12チームが本戦・表示、36チームが候補・非表示になっている。審査アプリのルールが変わっていないことを、読み取りで確認できる
   - _Requirements: 2.1, 2.2, 2.4, 10.3_
   - _Depends: 1.2, 2.1_
-  - _Blocked: 本戦12チームのエントリーNo一覧が未入手。48チーム全件の登録（下記メモ）は完了済みのため、残るのは finalist フラグの反映のみ（運営側から受け取ったら、この行を削除して実行する）_
+  - _Blocked: 2026-09-11時点で本戦確定10チーム（No.1, 7, 20, 22, 24, 33, 38, 44, 46, 47）に`finalist:true`・`participating:true`を反映済み（下記メモ）。運営から「本戦はこの10チームで最終確定」と明言されればこの行を削除して完了とする。追加のNoが来た場合は同じ手順を追加実行するだけで良い_
 
 
 - [ ] 5. 本番環境の設定と、実機での確認
@@ -169,3 +169,4 @@
 - タスク4.1: 「`teams`への書き込みを一時拒否するルール」のライブ確認は、本番相当DBへのルール変更が本戦前日のリスクに見合わないと判断し実施しなかった。代わりに`admin.js`の該当箇所（`participating-toggle`のchangeハンドラ、`.set()`失敗時に`el.checked`を戻し`participationMessage`にエラー表示するtry/catch）をコード確認し、3.2でレビュー済みの実装が要件3.6を満たしていることを確認した。
 - タスク4.1実施中、並行セッションによる未コミットの変更（`assets/images/logo.webp`追加・`.assetsignore`/`index.html`/`vote.css`更新、ヘッダーロゴ画像化）を作業ツリー上で確認した。本タスクでは一切触れておらず、コミットにも含めていない。
 - タスク4.3（先行実施分）: 本戦12チームの確定を待たずに、`team-patch.mjs seed`は使わず審査アプリの実データ48件を直接パッチ化して専用DBへ登録済み（全チーム`finalist:false`・`participating:false`で誰も投票画面に出ない安全な状態）。内訳はlife 24件(No.1-24)・local 15件(No.25-39)・work 9件(No.40-48)で審査アプリの部門別件数と一致。本戦12チームのNo一覧が届いたら、`node scripts/team-patch.mjs seed --judge <judge-appから再取得したJSON> --finalists <確定No,No,...> --current <現在の/audienceApp/teams> > patch.json` → `database:update`で、対象12チームだけが`finalist:true`・`participating:true`に切り替わる（既存チームの動画URL・名称は保持される）。これが完了すれば本タスクの完了条件を満たす。
+- タスク4.3（本戦10チーム確定分・2026-09-11）: 運営（審査結果ALL総合ランキング上位10チーム）からNo.1, 7, 20, 22, 24, 33, 38, 44, 46, 47の本戦確定が来場前に提示され、`team-patch.mjs seed`は使わず、対象10チームの`finalist`・`participating`のみをtrueにする直接パッチ（Firebase Realtime Databaseの複数パス同時PATCH、`{"entry-NN/finalist": true, "entry-NN/participating": true, ...}`）を作成・適用した。この方式は既存チームのtitle/section/videoUrlに一切触れないため、`seed`の`--judge`再取得や`--current`比較が不要で、フラグだけを差分更新したい場面（登録済みチームの一部を後から本戦入りさせる）に適した軽量な代替パス。適用前後を`database:get`で読み取り検証済み（適用後: finalist=true が10件、false が38件、対象No・チーム名は画像提示分と完全一致）。運営から「10チームで最終」と明言されれば4.3のBlocked行を削除できる。追加のNoが来た場合は同じ形の直接パッチ（対象entry-NNを追加するだけ）を再実行すればよく、`team-patch.mjs`の変更は不要。
