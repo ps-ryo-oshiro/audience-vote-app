@@ -7,6 +7,6 @@
     "directory": "./"
   },
   "kv_namespaces": [
-    { "binding": "AUDIENCE_VOTES", "id": "local-dev-placeholder" }
+    { "binding": "AUDIENCE_VOTES", "id": "511f53e133634264bdd1d81e50ba3d56" }
   ]
 }
