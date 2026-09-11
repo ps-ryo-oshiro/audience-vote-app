@@ -187,7 +187,7 @@ function computeVoteCounts(teams, votes) {
 
 function renderSummaryTable(teams, votes) {
   const { countsById } = computeVoteCounts(teams, votes);
-  const sectionGroups = { life: [], work: [], local: [] };
+  const sectionGroups = { life: [], local: [], work: [] };
 
   teams.forEach((team) => {
     if (sectionGroups[team.section]) {
