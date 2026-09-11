@@ -261,11 +261,9 @@ function renderTeams() {
       const displayTitle = typeof team.entryNo === 'number' ? `No.${team.entryNo} ${team.title}` : team.title;
       const videoHref = safeVideoUrl(team.videoUrl);
       const embedUrl = getYoutubeEmbedUrl(team.videoUrl);
-      const videoLink = embedUrl
-        ? `<button type="button" class="entry__video entry__video-toggle" data-embed-url="${escapeHtml(embedUrl)}" aria-expanded="false">VIDEO</button>`
-        : videoHref !== '#'
-          ? `<a class="entry__video" href="${escapeHtml(videoHref)}" target="_blank" rel="noopener noreferrer">VIDEO</a>`
-          : '';
+      const videoLink = !embedUrl && videoHref !== '#'
+        ? `<a class="entry__video" href="${escapeHtml(videoHref)}" target="_blank" rel="noopener noreferrer">VIDEO</a>`
+        : '';
       return `
         <label class="entry" data-team-id="${escapeHtml(team.id)}" style="animation-delay:${delay}s">
           <span class="entry__shard" aria-hidden="true"></span>
@@ -274,11 +272,11 @@ function renderTeams() {
             <input class="entry__radio" type="radio" name="teamId" value="${escapeHtml(team.id)}" />
             <span class="entry__box" aria-hidden="true"></span>
           </span>
+          ${embedUrl ? `<span class="entry__player"><iframe src="${escapeHtml(embedUrl)}" title="紹介動画" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></span>` : ''}
           <span class="entry__foot">
             ${videoLink}
             <span class="entry__mark" aria-hidden="true">SELECTED</span>
           </span>
-          ${embedUrl ? '<span class="entry__player" hidden></span>' : ''}
         </label>`;
     }).join('');
 
@@ -302,15 +300,6 @@ function renderTeams() {
   updateVoteStatus();
 }
 
-/* 動画プレイヤーを閉じ、VIDEOボタンの表示に戻す。sectionListのクリックハンドラ（開閉トグル）と
-   setActiveSection（タブ切り替え時の強制クローズ）の双方から呼ばれる共通処理 */
-function closeVideoPlayer(toggle, player) {
-  player.hidden = true;
-  player.innerHTML = '';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.textContent = 'VIDEO';
-}
-
 /* モバイルのタブ切り替え。768px以上はCSS側で常時全部門表示に戻すため無効化される */
 function setActiveSection(key) {
   if (appState.activeSection === key) return;
@@ -325,12 +314,6 @@ function setActiveSection(key) {
   document.querySelectorAll('.section-block').forEach((block) => {
     const active = block.dataset.section === key;
     block.classList.toggle('is-tab-active', active);
-    if (!active) {
-      block.querySelectorAll('.entry__video-toggle[aria-expanded="true"]').forEach((toggle) => {
-        const player = toggle.closest('.entry')?.querySelector('.entry__player');
-        if (player) closeVideoPlayer(toggle, player);
-      });
-    }
   });
 }
 
@@ -480,38 +463,12 @@ sectionList.addEventListener('change', (event) => {
   updateVoteStatus();
 });
 
-/* VIDEOボタンでカード内にiframeをインライン展開/収納する。
-   iframe属性は自前で組み立て、DBの値（動画URL）をHTMLとして注入しない。 */
+/* タブ切り替え専用のクリックハンドラ。動画は常時インライン表示のため開閉処理は不要 */
 sectionList.addEventListener('click', (event) => {
   const tabBtn = event.target.closest('.vote-tabs__btn');
   if (tabBtn) {
     setActiveSection(tabBtn.dataset.sectionTab);
-    return;
   }
-
-  const toggle = event.target.closest('.entry__video-toggle');
-  if (!toggle) return;
-
-  const player = toggle.closest('.entry')?.querySelector('.entry__player');
-  if (!player) return;
-
-  if (toggle.getAttribute('aria-expanded') === 'true') {
-    closeVideoPlayer(toggle, player);
-    return;
-  }
-
-  player.innerHTML = '';
-  const iframe = document.createElement('iframe');
-  iframe.src = toggle.dataset.embedUrl;
-  iframe.title = '紹介動画';
-  iframe.loading = 'lazy';
-  iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
-  iframe.referrerPolicy = 'strict-origin-when-cross-origin';
-  iframe.allowFullscreen = true;
-  player.appendChild(iframe);
-  player.hidden = false;
-  toggle.setAttribute('aria-expanded', 'true');
-  toggle.textContent = '閉じる';
 });
 
 voteForm.addEventListener('submit', async (event) => {

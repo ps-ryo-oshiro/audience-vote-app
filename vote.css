@@ -569,8 +569,6 @@ a:hover { color: var(--eyebrow); }
   aspect-ratio: 16 / 9;
 }
 
-.entry__player[hidden] { display: none; }
-
 .entry__player iframe {
   position: absolute;
   inset: 0;
