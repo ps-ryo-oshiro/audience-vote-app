@@ -622,6 +622,37 @@ a:hover { color: var(--eyebrow); }
 
 .vote-message.is-error { border-color: #d94d4d; color: #d94d4d; }
 
+.submit-bar__actions {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.submit-bar__actions .submit-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+.redo-btn {
+  flex: 0 0 auto;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  padding: 0 22px;
+  cursor: pointer;
+  background: transparent;
+  border: 2px solid var(--card-border);
+  color: var(--card-fg);
+  --notch: 12px;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--notch)), calc(100% - var(--notch)) 100%, 0 100%);
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.redo-btn:hover { background: var(--card-border); }
+
 .submit-bar__loader {
   position: absolute;
   left: 18px;
@@ -643,7 +674,6 @@ a:hover { color: var(--eyebrow); }
 .submit-btn {
   position: relative;
   overflow: hidden;
-  width: 100%;
   border: none;
   padding: 19px;
   font-family: inherit;
@@ -829,15 +859,7 @@ a:hover { color: var(--eyebrow); }
   letter-spacing: -0.01em;
 }
 
-.done-redo {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: center;
-  animation: kFadeUp 0.5s 1.3s both;
-}
-
-.done-redo__btn {
+.done-back-btn {
   font-family: inherit;
   font-size: 14px;
   font-weight: 700;
@@ -850,18 +872,12 @@ a:hover { color: var(--eyebrow); }
   --notch: 10px;
   clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--notch)), calc(100% - var(--notch)) 100%, 0 100%);
   transition: background 0.18s ease, border-color 0.18s ease;
+  animation: kFadeUp 0.5s 1.3s both;
 }
 
-.done-redo__btn:hover {
+.done-back-btn:hover {
   background: rgba(255, 255, 255, 0.14);
   border-color: #ffffff;
-}
-
-.done-redo__note {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  color: rgba(255, 255, 255, 0.7);
 }
 
 /* ---------- キーフレーム ---------- */
@@ -973,13 +989,12 @@ a:hover { color: var(--eyebrow); }
   /* 送信バーは全幅のフェード上に、CTA だけ中央 --cta-w で置く */
   .submit-bar { padding: 18px var(--pad-x) 24px; }
   .vote-message,
-  .submit-btn {
+  .submit-bar__actions {
     max-width: var(--cta-w);
     margin-left: auto;
     margin-right: auto;
   }
   .vote-message { margin-bottom: 10px; }
-  .submit-btn { display: block; }
   .submit-bar__loader {
     left: max(18px, calc(50% - var(--cta-w) / 2));
     right: max(18px, calc(50% - var(--cta-w) / 2));

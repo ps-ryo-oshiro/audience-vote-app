@@ -41,6 +41,7 @@ const voteStatusBadge = document.getElementById('vote-status-badge');
 const voteMessage = document.getElementById('vote-message');
 const voteSubmit = document.getElementById('vote-submit');
 const voteSubmitLabel = document.getElementById('vote-submit-label');
+const voteRedoInline = document.getElementById('vote-redo-inline');
 const entryCount = document.getElementById('entry-count');
 const submitBar = document.querySelector('.submit-bar');
 
@@ -353,6 +354,7 @@ function updateVoteStatus() {
   voteSubmit.classList.toggle('is-sending', sending);
   voteSubmit.disabled = locked || !appState.selectedId;
   voteSubmitLabel.innerHTML = submitLabelHtml(sending);
+  voteRedoInline.classList.toggle('hidden', !(appState.hasVoted && canRedo()));
 }
 
 function setLoaderVisible(visible) {
@@ -376,15 +378,9 @@ function canRedo() {
   return appState.isOpen;
 }
 
+/* やり直し操作はトップページの送信ボタン横に常駐させるため、完了画面には戻るリンクだけ置く */
 function showDoneOverlay(title) {
   if (document.querySelector('.done-overlay')) return;
-
-  const redoBlock = canRedo()
-    ? `<div class="done-redo">
-          <button type="button" class="done-redo__btn" id="vote-redo">投票をやり直す</button>
-          <span class="done-redo__note">受付中は何度でも選び直せます</span>
-        </div>`
-    : '';
 
   const overlay = document.createElement('div');
   overlay.className = 'done-overlay';
@@ -407,15 +403,13 @@ function showDoneOverlay(title) {
           <span class="done-card__label">YOUR VOTE</span>
           <span class="done-card__value">${escapeHtml(title)}</span>
         </div>
-        ${redoBlock}
+        <button type="button" class="done-back-btn" id="done-back">トップページへ戻る</button>
       </div>
     </div>
     <span class="done-overlay__band done-overlay__band--bottom" aria-hidden="true"></span>`;
 
   document.body.appendChild(overlay);
-
-  const redoButton = overlay.querySelector('#vote-redo');
-  if (redoButton) redoButton.addEventListener('click', enterRedoMode);
+  overlay.querySelector('#done-back').addEventListener('click', removeDoneOverlay);
 }
 
 function removeDoneOverlay() {
@@ -434,6 +428,8 @@ function enterRedoMode() {
   updateVoteStatus();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+
+voteRedoInline.addEventListener('click', enterRedoMode);
 
 /* 送信成功時の演出。呼び出し側で phase = SENDING にした後に呼ぶ。ローディング → 完了オーバーレイ */
 function playDoneSequence(title) {
@@ -561,7 +557,12 @@ initTheme();
     updateVoteStatus();
 
     if (appState.hasVoted) {
-      showMessage('投票済みです。再送信はできません。', 'success');
+      showMessage(
+        appState.isOpen
+          ? '投票済みです。やり直す場合は下の「投票をやり直す」ボタンから選び直せます。'
+          : '投票済みです。投票受付は終了しました。',
+        'success'
+      );
     }
   } catch (error) {
     console.error(error);
