@@ -46,6 +46,11 @@
   --blue: #1a56c8;
   --navy: #0d2a6b;
 
+  /* 部門バンドの配色差別化（ライトモードのみ使用。ダークモードは既存の統一イエローを維持） */
+  --band-accent-life: var(--navy);
+  --band-accent-local: var(--blue);
+  --band-accent-work: #0d5f8f;
+
   /* トンマナの斜体・等幅フォントはテーマに関わらず共通 */
   --skew: -8deg;
   --skew-counter: 8deg;
@@ -303,11 +308,36 @@ a:hover { color: var(--eyebrow); }
   transform: skewX(var(--skew));
 }
 
+[data-theme="light"] .band {
+  background: var(--section-accent, var(--band-bg));
+}
+
+.band__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transform: skewX(var(--skew-counter));
+}
+
+.band__no {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--band-code);
+  opacity: 0.85;
+}
+
 .band__name {
   font-size: 15px;
   font-weight: 900;
   letter-spacing: 0.1em;
-  transform: skewX(var(--skew-counter));
+}
+
+.band__tagline {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.82;
 }
 
 .band__code {
@@ -316,6 +346,28 @@ a:hover { color: var(--eyebrow); }
   letter-spacing: 0.2em;
   color: var(--band-code);
   transform: skewX(var(--skew-counter));
+}
+
+.band__visual {
+  position: relative;
+  height: 96px;
+  margin: -4px -6px 0;
+  background-size: cover;
+  background-position: center;
+  --notch: 14px;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--notch)), calc(100% - var(--notch)) 100%, 0 100%);
+}
+
+.band__visual-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(6, 26, 77, 0) 55%, rgba(6, 26, 77, 0.35) 100%);
+}
+
+[data-theme="dark"] .band__visual-overlay {
+  background:
+    linear-gradient(180deg, rgba(6, 26, 77, 0.15) 0%, rgba(6, 26, 77, 0.55) 100%),
+    linear-gradient(100deg, rgba(53, 194, 240, 0.22), transparent 60%);
 }
 
 .section-block__list { padding: 0 18px; }
@@ -774,6 +826,8 @@ a:hover { color: var(--eyebrow); }
   .section-block { padding-top: 36px; }
   .band { padding: 13px calc(var(--pad-x) + 6px); }
   .band__name { font-size: 17px; }
+  .band__tagline { font-size: 12.5px; }
+  .band__visual { height: 140px; }
 
   .section-block__list {
     display: grid;

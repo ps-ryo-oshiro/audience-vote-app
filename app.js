@@ -6,9 +6,9 @@
    ========================================================= */
 
 const SECTIONS = [
-  { key: 'life', name: 'ライフ部門', code: 'LIFE' },
-  { key: 'work', name: 'ワーク部門', code: 'WORK' },
-  { key: 'local', name: 'ローカル部門', code: 'LOCAL' }
+  { key: 'life', name: 'ライフ部門', code: 'LIFE', no: '01', tagline: '暮らしの不便を解消する', image: 'assets/images/categories/life.webp' },
+  { key: 'local', name: 'ローカル部門', code: 'LOCAL', no: '02', tagline: '沖縄固有の不便を解消する', image: 'assets/images/categories/local.webp' },
+  { key: 'work', name: 'ワーク部門', code: 'WORK', no: '03', tagline: 'シゴトの不便を解消する', image: 'assets/images/categories/work.webp' }
 ];
 
 const DEFAULT_TEAMS = [
@@ -201,9 +201,16 @@ function renderTeams() {
       });
     const band = `
       <div class="band-clip">
-        <div class="band">
-          <span class="band__name">${escapeHtml(section.name)}</span>
+        <div class="band" style="--section-accent: var(--band-accent-${escapeHtml(section.key)})">
+          <div class="band__info">
+            <span class="band__no">CATEGORY ${escapeHtml(section.no)}</span>
+            <span class="band__name">${escapeHtml(section.name)}</span>
+            <span class="band__tagline">〜 ${escapeHtml(section.tagline)} 〜</span>
+          </div>
           <span class="band__code">${escapeHtml(section.code)}</span>
+        </div>
+        <div class="band__visual" style="background-image:url('${escapeHtml(section.image)}')">
+          <span class="band__visual-overlay" aria-hidden="true"></span>
         </div>
       </div>`;
 
