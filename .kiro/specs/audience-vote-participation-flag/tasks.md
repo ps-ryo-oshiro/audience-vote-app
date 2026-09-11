@@ -130,7 +130,8 @@
   - 完了状態: 専用DBに48チームが登録され、本戦12チームが本戦・表示、36チームが候補・非表示になっている。審査アプリのルールが変わっていないことを、読み取りで確認できる
   - _Requirements: 2.1, 2.2, 2.4, 10.3_
   - _Depends: 1.2, 2.1_
-  - _Blocked: 本戦12チームのエントリーNo一覧が未入手（運営側から受け取ったら、この行を削除して実行する）_
+  - _Blocked: 本戦12チームのエントリーNo一覧が未入手。48チーム全件の登録（下記メモ）は完了済みのため、残るのは finalist フラグの反映のみ（運営側から受け取ったら、この行を削除して実行する）_
+
 
 - [ ] 5. 本番環境の設定と、実機での確認
 - [ ] 5.1 デプロイ先のアカウントに、KVとWorkerのsecretを用意する
@@ -167,3 +168,4 @@
 - タスク4.1: Cloudflare Workers Assetsの既定挙動（`html_handling`）により、ローカル`wrangler dev`では`/index.html`→`/`、`/admin.html`→`/admin`へ307リダイレクトされ、直接200では返らない（最終的にブラウザが追従して200になるため機能上の実害はない）。design.md/タスク1.4完了条件の「200になり」という記述とは字面上ズレるが、許可リスト機構自体（非対象404）は正しく機能している。本番環境でも同様の挙動になる想定。
 - タスク4.1: 「`teams`への書き込みを一時拒否するルール」のライブ確認は、本番相当DBへのルール変更が本戦前日のリスクに見合わないと判断し実施しなかった。代わりに`admin.js`の該当箇所（`participating-toggle`のchangeハンドラ、`.set()`失敗時に`el.checked`を戻し`participationMessage`にエラー表示するtry/catch）をコード確認し、3.2でレビュー済みの実装が要件3.6を満たしていることを確認した。
 - タスク4.1実施中、並行セッションによる未コミットの変更（`assets/images/logo.webp`追加・`.assetsignore`/`index.html`/`vote.css`更新、ヘッダーロゴ画像化）を作業ツリー上で確認した。本タスクでは一切触れておらず、コミットにも含めていない。
+- タスク4.3（先行実施分）: 本戦12チームの確定を待たずに、`team-patch.mjs seed`は使わず審査アプリの実データ48件を直接パッチ化して専用DBへ登録済み（全チーム`finalist:false`・`participating:false`で誰も投票画面に出ない安全な状態）。内訳はlife 24件(No.1-24)・local 15件(No.25-39)・work 9件(No.40-48)で審査アプリの部門別件数と一致。本戦12チームのNo一覧が届いたら、`node scripts/team-patch.mjs seed --judge <judge-appから再取得したJSON> --finalists <確定No,No,...> --current <現在の/audienceApp/teams> > patch.json` → `database:update`で、対象12チームだけが`finalist:true`・`participating:true`に切り替わる（既存チームの動画URL・名称は保持される）。これが完了すれば本タスクの完了条件を満たす。
