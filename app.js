@@ -183,6 +183,34 @@ function safeVideoUrl(value) {
   }
 }
 
+/* youtu.be / youtube.com の各種URL形式から動画IDを取り出し、
+   常に自前のiframe属性で埋め込みURLを組み立てる（DBの値をそのままiframe化しない）。
+   YouTube以外・ID形式が不正な場合はnullを返し、通常の外部リンク表示にフォールバックする。 */
+function getYoutubeEmbedUrl(value) {
+  const href = safeVideoUrl(value);
+  if (href === '#') return null;
+  let url;
+  try {
+    url = new URL(href);
+  } catch (error) {
+    return null;
+  }
+  const host = url.hostname.replace(/^www\.|^m\./, '');
+  let id = null;
+  if (host === 'youtu.be') {
+    id = url.pathname.slice(1);
+  } else if (host === 'youtube.com') {
+    if (url.pathname === '/watch') {
+      id = url.searchParams.get('v');
+    } else if (url.pathname.startsWith('/embed/')) {
+      id = url.pathname.slice('/embed/'.length);
+    } else if (url.pathname.startsWith('/shorts/')) {
+      id = url.pathname.slice('/shorts/'.length);
+    }
+  }
+  return id && /^[\w-]{11}$/.test(id) ? `https://www.youtube.com/embed/${id}` : null;
+}
+
 function isLocked() {
   return !appState.isOpen || appState.hasVoted || appState.phase !== PHASE.IDLE;
 }
@@ -223,9 +251,12 @@ function renderTeams() {
       const delay = (0.12 + index * 0.06).toFixed(2);
       const displayTitle = typeof team.entryNo === 'number' ? `No.${team.entryNo} ${team.title}` : team.title;
       const videoHref = safeVideoUrl(team.videoUrl);
-      const videoLink = videoHref !== '#'
-        ? `<a class="entry__video" href="${escapeHtml(videoHref)}" target="_blank" rel="noopener noreferrer">VIDEO</a>`
-        : '';
+      const embedUrl = getYoutubeEmbedUrl(team.videoUrl);
+      const videoLink = embedUrl
+        ? `<button type="button" class="entry__video entry__video-toggle" data-embed-url="${escapeHtml(embedUrl)}" aria-expanded="false">VIDEO</button>`
+        : videoHref !== '#'
+          ? `<a class="entry__video" href="${escapeHtml(videoHref)}" target="_blank" rel="noopener noreferrer">VIDEO</a>`
+          : '';
       return `
         <label class="entry" data-team-id="${escapeHtml(team.id)}" style="animation-delay:${delay}s">
           <span class="entry__shard" aria-hidden="true"></span>
@@ -238,6 +269,7 @@ function renderTeams() {
             ${videoLink}
             <span class="entry__mark" aria-hidden="true">SELECTED</span>
           </span>
+          ${embedUrl ? '<span class="entry__player" hidden></span>' : ''}
         </label>`;
     }).join('');
 
@@ -354,6 +386,38 @@ sectionList.addEventListener('change', (event) => {
   appState.selectedId = event.target.value;
   hideMessage();
   updateVoteStatus();
+});
+
+/* VIDEOボタンでカード内にiframeをインライン展開/収納する。
+   iframe属性は自前で組み立て、DBの値（動画URL）をHTMLとして注入しない。 */
+sectionList.addEventListener('click', (event) => {
+  const toggle = event.target.closest('.entry__video-toggle');
+  if (!toggle) return;
+
+  const player = toggle.closest('.entry')?.querySelector('.entry__player');
+  if (!player) return;
+
+  const isOpen = toggle.getAttribute('aria-expanded') === 'true';
+  player.innerHTML = '';
+
+  if (isOpen) {
+    player.hidden = true;
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.textContent = 'VIDEO';
+    return;
+  }
+
+  const iframe = document.createElement('iframe');
+  iframe.src = toggle.dataset.embedUrl;
+  iframe.title = '紹介動画';
+  iframe.loading = 'lazy';
+  iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+  iframe.referrerPolicy = 'strict-origin-when-cross-origin';
+  iframe.allowFullscreen = true;
+  player.appendChild(iframe);
+  player.hidden = false;
+  toggle.setAttribute('aria-expanded', 'true');
+  toggle.textContent = '閉じる';
 });
 
 voteForm.addEventListener('submit', async (event) => {
