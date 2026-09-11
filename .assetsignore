@@ -6,3 +6,5 @@
 !style.css
 !vote.css
 !firebase-config.js
+!assets/
+!assets/**

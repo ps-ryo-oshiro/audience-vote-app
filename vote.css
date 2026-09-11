@@ -139,9 +139,31 @@ a:hover { color: var(--eyebrow); }
 }
 
 .vote-header__brand {
-  font-size: 13px;
-  font-weight: 900;
-  transform: skewX(var(--skew));
+  display: flex;
+  align-items: center;
+}
+
+.vote-header__brand-logo {
+  display: block;
+  height: 28px;
+  width: auto;
+  transform-origin: 50% 100%;
+  animation: brand-logo-sway 3s ease-in-out infinite;
+}
+
+[data-theme="dark"] .vote-header__brand-logo {
+  filter: brightness(0) invert(1);
+}
+
+@keyframes brand-logo-sway {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vote-header__brand-logo {
+    animation: none;
+  }
 }
 
 .vote-header__right {
@@ -740,7 +762,7 @@ a:hover { color: var(--eyebrow); }
   .shell { max-width: none; }
 
   .vote-header { padding: 16px var(--pad-x); }
-  .vote-header__brand { font-size: 15px; }
+  .vote-header__brand-logo { height: 34px; }
 
   .hero { padding: 64px var(--pad-x) 56px; }
   .hero__title { font-size: 64px; }
