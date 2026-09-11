@@ -4,11 +4,12 @@ audience-vote-app を Cloudflare Workers に公開するための手順書。
 
 - **対象読者**: Cloudflare を触ったことがない社内メンバー
 - **前提知識**: ターミナルでコマンドをコピペ実行できること。それ以外の前提は不要
-- **所要時間**: デプロイだけなら約10分。「[3. 本番公開前の必須設定](#3-本番公開前の必須設定必読)」まで含めると約1〜2時間
+- **所要時間**: ローカル確認までで約15分。チーム登録・本番デプロイまで含めると約1時間
 
-> [!WARNING]
-> **現在公開中のURLは、そのままではコンテストに使えません。**
-> 投票データが集計されない状態です。理由と対処は「3. 本番公開前の必須設定」を参照。
+> [!NOTE]
+> 現在の進捗（何が完了・未完了か）は `.kiro/specs/audience-vote-participation-flag/tasks.md` が正。
+> 本番デプロイ（本手順書の「4. 本番デプロイ」）は、本戦12チームのエントリーNo一覧の受領（タスク4.3）と
+> デプロイ先Cloudflareアカウントの確定（タスク5.1）が前提のため、現時点では未実施。
 
 ---
 
@@ -16,24 +17,9 @@ audience-vote-app を Cloudflare Workers に公開するための手順書。
 
 このアプリは **Cloudflare Workers（Workers Static Assets）** 1本でホスティングしている。Webサーバーの構築もビルドも不要で、リポジトリのファイルがそのまま世界中のエッジから配信される。
 
-### 現行の公開URL
+### データストア
 
-```
-https://audience-vote-app.ry-oshiro.workers.dev/
-         └─ Worker名 ─┘  └─ アカウントの ─┘
-                          サブドメイン
-```
-
-| 項目 | 値 |
-|---|---|
-| Worker名 | `audience-vote-app`（`wrangler.jsonc` の `name`） |
-| デプロイ先アカウント | `Ry-oshiro@pdc.proto-g.co.jp's Account` |
-| 独自ドメイン | 未設定（`workers.dev` の無料サブドメインを使用） |
-| CI/CD | なし（各自のPCから手動デプロイ） |
-
-> [!NOTE]
-> **属人化の注意**: 現在は特定の個人アカウントにデプロイされている。その人が退職・異動するとURLごと消える。
-> 継続運用するなら「[5. 別アカウントへデプロイする（引き継ぎ）](#5-別アカウントへデプロイする引き継ぎ)」で共用アカウントに移すこと。
+投票アプリは **judge-app（審査アプリ）とは完全に別の専用Firebaseプロジェクト**を使う。審査アプリのDBには一切書き込まない（読み取りのみ、チーム登録時だけ）。管理画面・投票画面とも**認証は一切使わない**（設計上の決定事項）。整合性は「票の変更・削除の禁止」をFirebase Realtime Databaseのルールで担保する。
 
 ### リクエストの流れ
 
@@ -41,47 +27,45 @@ https://audience-vote-app.ry-oshiro.workers.dev/
 ブラウザ
   │
   ├─ GET /              ─▶ Worker (worker.js) ─▶ env.ASSETS ─▶ index.html などの静的ファイル
-  ├─ GET /style.css     ─▶ 同上
+  ├─ GET /style.css     ─▶ 同上（`.assetsignore` の許可リストにあるファイルのみ配信、それ以外は404）
   │
-  └─ POST /api/vote     ─▶ Worker (worker.js) ─▶ KV (AUDIENCE_VOTES) に投票トークンを記録
-                                                  二重投票なら 409 を返す
+  └─ POST /api/vote     ─▶ Worker (worker.js) ─▶ 表示対象チームか検証
+                                                  ─▶ Firebase (audienceApp/votes) に投票データを書き込み
+                                                  ─▶ KV (AUDIENCE_VOTES) に投票トークンを記録し二重投票を判定
 ```
 
-`wrangler.jsonc` の `assets.directory: "./"` により、**リポジトリ直下の全ファイルがそのまま公開される**。`worker.js` は `/api/vote` (POST) だけを処理し、それ以外は静的ファイル配信にフォールバックする。
+`wrangler.jsonc` の `assets.directory: "./"` により、リポジトリ直下のファイルが対象になるが、**`.assetsignore` で配信を7ファイル（`index.html`・`admin.html`・`app.js`・`admin.js`・`style.css`・`vote.css`・`firebase-config.js`）だけに絞っている**（既定は全拒否、明示的に許可したものだけ配信）。クライアント側ルーティングは使わないため、`assets.not_found_handling`（SPAフォールバック）の設定は入れていない。
 
 > [!CAUTION]
-> リポジトリ直下に置いたファイルは **URL を直接叩けば誰でも読める**。
+> `.assetsignore` で許可したファイルは **URL を直接叩けば誰でも読める**。
 > 例: `https://<公開URL>/firebase-config.js` はブラウザで開ける。
-> APIキーやパスワードを含むファイルを直下に置かないこと。
+> `firebase-config.js` の `apiKey` は公開前提の値なので問題ないが、新しいファイルを許可リストに足すときは中身に秘密情報を含めないこと。
 
 ---
 
-## 2. デプロイ手順
+## 2. 初回セットアップ
 
 ### 2-1. 事前準備
 
 #### (1) Node.js をインストールする
-
-ターミナルで確認する。
 
 ```bash
 node -v
 npm -v
 ```
 
-`v20` 以上が表示されればOK（動作確認時は `v24.15.0` / npm `11.12.1`）。
-コマンドが見つからない場合は [Node.js公式サイト](https://nodejs.org/) から LTS 版をインストールする。
+`v20` 以上が表示されればOK（動作確認時は `v24` 系）。無ければ [Node.js公式サイト](https://nodejs.org/) から LTS 版をインストールする。
 
 #### (2) Cloudflare アカウントを用意する
 
-[Cloudflare](https://dash.cloudflare.com/sign-up) で無料アカウントを作成する。クレジットカード登録は不要。
-Workers の無料枠は **1日10万リクエスト**。社内コンテスト規模なら十分。
+[Cloudflare](https://dash.cloudflare.com/sign-up) で無料アカウントを作成する。クレジットカード登録は不要。Workers の無料枠は **1日10万リクエスト**。社内コンテスト規模なら十分。
 
-#### (3) リポジトリを取得する
+#### (3) リポジトリを取得し、依存関係を入れる
 
 ```bash
 git clone <このリポジトリのURL>
 cd audience-vote-app
+npm install
 ```
 
 #### (4) Cloudflare にログインする
@@ -90,11 +74,8 @@ cd audience-vote-app
 npx wrangler login
 ```
 
-- 初回は `wrangler` のインストール確認が出るので `y` で進める
 - ブラウザが自動で開き、Cloudflare の認可画面が表示される → **Allow** をクリック
 - ターミナルに `Successfully logged in.` が出れば成功
-
-ログインしているアカウントを確認する。
 
 ```bash
 npx wrangler whoami
@@ -102,19 +83,139 @@ npx wrangler whoami
 
 **成功時の見え方**: アカウント名と Account ID がテーブル表示される。ここが意図したアカウントであることを必ず確認する。
 
-### 2-2. ローカルで動作確認する
+### 2-2. 接続設定を用意する
 
-Cloudflare にデプロイする前に、手元で Worker を動かして確認する。
+`firebase-config.js`・`.dev.vars` はgit管理外（`.gitignore`参照）。ひな形からコピーして値を入れる。
 
 ```bash
-npx wrangler dev
+cp firebase-config.example.js firebase-config.js
 ```
 
-**成功時の見え方**: `Ready on http://localhost:8787` と表示される。ブラウザでそのURLを開き、投票画面が表示されればOK。`Ctrl + C` で停止。
+```js
+window.firebaseConfig = {
+  apiKey: "...",
+  authDomain: "...",
+  databaseURL: "...",
+  projectId: "...",
+  storageBucket: "...",
+  messagingSenderId: "...",
+  appId: "..."
+};
 
-> 静的ファイルの見た目だけ確認したい場合は `npm start`（`http://localhost:8000`）でも可。ただしこちらは `/api/vote` が動かない。
+window.audienceDemoAdmin = {
+  username: "admin",
+  password: "admin123"   // 本番公開の直前に必ず変更する（4-3参照）
+};
+```
 
-### 2-3. デプロイする
+`.dev.vars`（Workerのローカル環境変数）:
+
+```
+FIREBASE_DB_URL=https://<プロジェクト名>-default-rtdb.<リージョン>.firebasedatabase.app
+```
+
+セキュリティルールは `firebase.rules.json` の内容を、Firebase Console の「Realtime Database」→「ルール」タブに貼り付けるか、以下で反映する。
+
+```bash
+npx firebase-tools deploy --only database --project <投票アプリのプロジェクトID>
+```
+
+> [!IMPORTANT]
+> ルールは `audienceApp/teams`・`audienceApp/settings` が読み書き可、`audienceApp/votes` が読み取り可・新規追加のみ可（削除・上書き不可）になっている。認証なしでも整合性が壊れないための唯一の防御線なので、動作確認中でも緩めない。
+
+### 2-3. KV namespace と Worker の secret を用意する（二重投票防止）
+
+```bash
+npx wrangler kv namespace create AUDIENCE_VOTES
+```
+
+表示された `id` を `wrangler.jsonc` の `kv_namespaces` に追記する（ローカル確認用のプレースホルダーIDから、本番用のIDに差し替える）。
+
+```jsonc
+{
+  "kv_namespaces": [
+    { "binding": "AUDIENCE_VOTES", "id": "ここに表示されたidを貼る" }
+  ]
+}
+```
+
+Worker本体（本番環境）の `FIREBASE_DB_URL` は `.dev.vars` ではなく secret で渡す。
+
+```bash
+npx wrangler secret put FIREBASE_DB_URL
+# プロンプトが出たら databaseURL と同じ値を貼り付ける
+```
+
+### 2-4. ローカルで動作確認する
+
+```bash
+npx wrangler dev --persist-to /tmp/audience-vote-wrangler-state
+```
+
+**成功時の見え方**: `Ready on http://localhost:8787`（ポートは環境により変わる）と表示される。ブラウザでそのURLを開き、投票画面が表示されればOK。`Ctrl + C` で停止。
+
+> [!WARNING]
+> `--persist-to` に **リポジトリ外のパス**を指定すること。プロジェクト内（既定の `.wrangler/state`）のままだと、ファイル監視が自身の状態書き込みを検知して無限リロードループに陥り、リクエストがほぼ通らなくなる。
+
+> 静的ファイルの見た目だけ確認したい場合は `npm start`（`http://localhost:8000`）でも可。ただしこちらは `/api/vote` が動かず、Firebase設定済みでも常にlocalStorageフォールバックになる。
+
+---
+
+## 3. チームを登録する（`scripts/team-patch.mjs`）
+
+管理画面からのファイルアップロードは廃止した。チームのエントリーNo・アプリ名・部門は審査アプリ（judge-app）側で既に確定しているため、CLIスクリプトで審査アプリのデータを読み取り専用で取り込み、投票アプリ専用DBへ反映する。
+
+> [!CAUTION]
+> judge-app のプロジェクトID・URLは、このリポジトリのどのファイルにも書かない（judge-app はルールが全開放のため、プロジェクトIDが漏れるとDBが丸見えになる）。実行時に環境変数で渡し、コマンド履歴以外に残さない。
+
+### 3-1. 審査アプリのチーム一覧を読み取り専用で取得する
+
+```bash
+npx firebase-tools database:get /config/teams --project "$JUDGE_PROJECT_ID" > /tmp/judge-teams.json
+```
+
+（`JUDGE_PROJECT_ID` は運営から共有された審査アプリのプロジェクトID。シェル変数として渡し、ファイルには書かない）
+
+### 3-2. 本戦12チームを登録する（初回・本戦確定時）
+
+```bash
+node scripts/team-patch.mjs seed \
+  --judge /tmp/judge-teams.json \
+  --finalists <本戦12チームのエントリーNoをカンマ区切りで> \
+  > /tmp/patch-seed.json
+
+npx firebase-tools database:update /audienceApp/teams /tmp/patch-seed.json --project <投票アプリのプロジェクトID> -f
+```
+
+既存チームがある状態（当日の候補入れ替え後の再登録など）で使う場合は `--current` に現在の `/audienceApp/teams`（`database:get` の出力）を渡す。指定していない項目（動画URL・名称など）は消えない。
+
+### 3-3. 動画URLを追記する
+
+```bash
+node scripts/team-patch.mjs videos --file <no,url または title,url のCSV> --current <現在のteams JSON> > /tmp/patch-videos.json
+npx firebase-tools database:update /audienceApp/teams /tmp/patch-videos.json --project <投票アプリのプロジェクトID> -f
+```
+
+### 3-4. 名称を修正する
+
+```bash
+node scripts/team-patch.mjs rename --no <エントリーNo> --title <新しい名称> --current <現在のteams JSON> > /tmp/patch-rename.json
+npx firebase-tools database:update /audienceApp/teams /tmp/patch-rename.json --project <投票アプリのプロジェクトID> -f
+```
+
+### 3-5. 適用後に確認する
+
+```bash
+npx firebase-tools database:get /audienceApp/teams --project <投票アプリのプロジェクトID>
+```
+
+本戦12チームが `finalist: true`、それ以外が `finalist: false` になっていること、既存チームの動画URL・名称が消えていないことを確認する。
+
+---
+
+## 4. 本番デプロイ
+
+### 4-1. デプロイする
 
 ```bash
 npx wrangler deploy
@@ -130,12 +231,23 @@ Deployed audience-vote-app triggers (x.xx sec)
 Current Version ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-表示されたURLをブラウザで開き、投票画面が表示されればデプロイ完了。
+初回デプロイ時のみ「`workers.dev` サブドメインを登録しますか？」と聞かれることがある。任意の名前（英数字）を入力すると、それが `https://audience-vote-app.<入力した名前>.workers.dev` の中央部分になる。**後から変更するとURLが変わる**ので慎重に決めること。
 
-> [!TIP]
-> 初回デプロイ時のみ「`workers.dev` サブドメインを登録しますか？」と聞かれることがある。任意の名前（英数字）を入力すると、それが `https://<Worker名>.<入力した名前>.workers.dev` の中央部分になる。**後から変更するとURLが変わる**ので慎重に決めること。
+### 4-2. 公開後の確認項目
 
-### 2-4. 更新をデプロイする
+- [ ] 公開URLで配信対象の7ファイル（`.assetsignore`参照）が取得でき、それ以外（`README.md`・`worker.js`・`docs/`・`firebase.rules.json`・`scripts/team-patch.mjs`・`.kiro/`等）が404になる
+- [ ] 配信されるファイルのどこにも judge-app のプロジェクトID・URL・文字列が含まれない
+- [ ] `firebase-config.js` の `databaseURL` が、実際に投票を書き込んでいるプロジェクトのURLと一致している（複数プロジェクトを行き来していると食い違うことがある）
+- [ ] judge-app 側のルールが変わっていないことを、読み取りのみで確認する（`database:get / --project "$JUDGE_PROJECT_ID"` がエラーにならない＝ルールが全開放のまま）
+- [ ] 別々の端末2台で投票 → 管理画面の集計が2票になる。同じ端末の2回目は拒否される
+- [ ] 投票受付を停止すると投票画面のフォームが無効になる
+- [ ] 投票画面を開いた後、Firebase Console の「使用状況」で接続数が戻ることを確認する（`goOffline()` が効いているか）
+
+### 4-3. 管理者ID/パスワードを変更する
+
+`firebase-config.js` の `window.audienceDemoAdmin` が `admin` / `admin123` のままだと、`https://<公開URL>/firebase-config.js` を開けば誰でも読める。認証はクライアントJSの単純比較のみでサーバー側チェックはないため、**本番公開の直前に**推測されにくい値へ変更し、再デプロイする。
+
+### 4-4. 更新をデプロイする
 
 コードを直したら、同じコマンドを実行するだけ。
 
@@ -147,143 +259,21 @@ npx wrangler deploy
 
 ---
 
-## 3. 本番公開前の必須設定（必読）
+## 5. 当日のログの見方
 
-現在のコードは **デモ・動作確認用の設定のまま**。以下の4点を対応しないと、コンテスト本番で投票結果が出ない・管理画面が乗っ取られる、といった事故になる。
+```bash
+npx wrangler tail
+```
 
-### 3-1.【最重要】投票データがどこにも保存されない
-
-**現象**: 投票しても管理画面の集計が0件のまま。
-
-**原因**: `app.js` の投票処理は、Firebase 設定済みの場合 `/api/vote` に POST するだけで、**投票先（teamId）を `audienceApp/votes` に書き込んでいない**。`worker.js` 側も KV に「この端末は投票済み」というフラグを立てるだけで、誰がどのアプリに投票したかは保存していない。結果、票が集計対象としてどこにも残らない。
-
-**対応**: 以下のどちらかの方針でコードを修正する。
-
-- **方針A（推奨）**: `worker.js` の `/api/vote` で、二重投票チェックを通過した後に Firebase REST API 経由で `audienceApp/votes` に書き込む。投票データがクライアント任せにならず改ざんに強い
-- **方針B（簡易）**: `app.js` で `/api/vote` が成功した後に、クライアントから `db.ref('audienceApp/votes').push({...})` する。実装は早いが、ブラウザから直接DBを書き換えられる余地が残る
-
-> [!IMPORTANT]
-> これは設定ではなく **コード修正が必要な不具合**。デプロイ手順だけ実施しても解消しない。
-
-### 3-2. Firebase Realtime Database が未接続
-
-**現象**: `firebase-config.js` がプレースホルダー（`YOUR_API_KEY`）のままのため、`app.js:67` の判定で Firebase 未設定と見なされ、**全データが各端末の localStorage に保存される**フォールバックモードで動作する。参加者の票はその人のブラウザにしか残らず、管理画面の集計は「管理者自身の端末の票」しか見えない。
-
-**対応手順**:
-
-1. [Firebase Console](https://console.firebase.google.com/) でプロジェクトを作成する
-2. 「構築」→「Realtime Database」→「データベースを作成」でRTDBを有効化する
-3. 「プロジェクトの設定」→「マイアプリ」→ ウェブアプリを追加し、表示された設定値を控える
-4. `firebase-config.js` のプレースホルダーを実際の値に置き換える
-
-   ```js
-   window.firebaseConfig = {
-     apiKey: "実際の値",
-     authDomain: "実際の値",
-     databaseURL: "https://<プロジェクト名>-default-rtdb.firebaseio.com",
-     projectId: "実際の値",
-     storageBucket: "実際の値",
-     messagingSenderId: "実際の値",
-     appId: "実際の値"
-   };
-   ```
-
-5. Firebase Console の Realtime Database →「ルール」タブに `firebase.rules.json` の内容を貼り付けて公開する
-
-> [!NOTE]
-> **`firebase.rules.json` のルールは現状のままでは機能しない。**
-> `audienceApp/votes` の `.read` が `"auth != null"` になっているが、管理画面は Firebase Auth を使っていない（3-3参照）ため、管理者が票を読み出せない。
-> 3-3 で Firebase Auth を導入するか、ルール側を用途に合わせて調整すること。
-
-> [!TIP]
-> Firebase の `apiKey` はブラウザに配布される前提の公開情報であり、秘匿しても意味がない。
-> **アクセス制御はセキュリティルールで行う**のが正しい設計。ルール設定を省略しないこと。
-
-### 3-3. 管理者ID/パスワードが公開されている
-
-**現象**: `firebase-config.js` に `admin` / `admin123` が平文で入っており、`https://<公開URL>/firebase-config.js` を開けば誰でも読める。しかも認証はクライアントJSの単純比較のみで、サーバー側チェックが存在しない。実質的に管理画面は無防備。
-
-**対応**（上から順に望ましい）:
-
-1. **Firebase Auth に置き換える**（推奨）。メール/パスワード認証を有効化し、管理者アカウントを1つ作る。セキュリティルールの `auth != null` も正しく機能するようになる
-2. **Cloudflare Access を被せる**。`/admin.html` へのアクセスに社内SSO（Google Workspace等）を要求する。コード修正なしで守れる
-3. 最低限の暫定対応として、当日限りの推測困難なパスワードに変更し、コンテスト終了後にデプロイを削除する
-
-> [!CAUTION]
-> `admin` / `admin123` のまま本番公開しないこと。管理画面からは投票の受付停止・エントリーデータの上書きができる。
-
-### 3-4. 二重投票防止が効いていない
-
-**現象**: 同じ端末から何度でも投票できてしまう。
-
-**原因**: `wrangler.jsonc` に KV バインディング `AUDIENCE_VOTES` の定義がない。そのため `worker.js` はインメモリの `Map` にフォールバックし、Workers のisolateが入れ替わるたびに記録が消える。
-
-**対応手順**:
-
-1. KV namespace を作成する
-
-   ```bash
-   npx wrangler kv namespace create AUDIENCE_VOTES
-   ```
-
-   > wrangler のバージョンによっては `npx wrangler kv:namespace create AUDIENCE_VOTES`（コロン区切り）。エラーが出たら書式を切り替える。
-
-   **成功時の見え方**: 設定に追記すべき内容が `id` 付きで表示される。
-
-2. 表示された `id` を `wrangler.jsonc` に追記する
-
-   ```jsonc
-   {
-     "$schema": "node_modules/wrangler/config-schema.json",
-     "name": "audience-vote-app",
-     "compatibility_date": "2026-09-09",
-     "main": "worker.js",
-     "assets": {
-       "directory": "./",
-       "not_found_handling": "single-page-application"
-     },
-     "kv_namespaces": [
-       { "binding": "AUDIENCE_VOTES", "id": "ここに表示されたidを貼る" }
-     ]
-   }
-   ```
-
-3. 再デプロイする
-
-   ```bash
-   npx wrangler deploy
-   ```
-
-4. 確認する。投票後に同じ端末から再投票を試み、「この端末ではすでに投票済みです。」と表示されればOK
-
-> [!NOTE]
-> この仕組みは端末（ブラウザ）単位の抑止であり、シークレットウィンドウや別端末からの投票は防げない。厳密な1人1票が必要なら、社内SSOによる本人確認が必要。
+本番Workerのログとエラーがリアルタイムで流れる。`/api/vote` が失敗している場合はここに出る（`server_misconfigured` が出た場合は secret か KV binding の設定漏れ）。`Ctrl + C` で停止。
 
 ---
 
-## 4. 公開前チェックリスト
+## 6. 別アカウントへデプロイする（引き継ぎ・アカウント未確定の場合）
 
-コンテスト当日の前に、以下を上から順に確認する。
+現在の公開URL（`https://audience-vote-app.ry-oshiro.workers.dev/`）は大城さんの個人アカウント。別アカウントに移す場合の手順。
 
-- [ ] `npx wrangler whoami` で意図したアカウントにログインしている
-- [ ] `firebase-config.js` が実際の値に置き換わっている（3-2）
-- [ ] Firebase Console にセキュリティルールを反映した（3-2）
-- [ ] 投票データが `audienceApp/votes` に保存されるようコードを修正した（3-1）
-- [ ] `wrangler.jsonc` に `kv_namespaces` を追記した（3-4）
-- [ ] 管理者ID/パスワードを変更、または認証方式を置き換えた（3-3）
-- [ ] `npx wrangler deploy` を実行した
-- [ ] **実機テスト**: スマホA で投票 → スマホB で投票 → 管理画面で2票集計されている
-- [ ] **二重投票テスト**: スマホA から再投票 → ブロックされる
-- [ ] **受付ON/OFFテスト**: 管理画面で受付停止 → 投票画面が「停止中」になり投票できない
-- [ ] 当日の回線（会場Wi-Fi / モバイル回線）で公開URLが開けることを確認した
-
----
-
-## 5. 別アカウントへデプロイする（引き継ぎ）
-
-現在は個人アカウントにデプロイされているため、共用アカウントへ移す場合の手順。
-
-### 5-1. アカウントを切り替える
+### 6-1. アカウントを切り替える
 
 ```bash
 npx wrangler logout
@@ -302,7 +292,7 @@ npx wrangler whoami
 CLOUDFLARE_ACCOUNT_ID=<移行先のAccount ID> npx wrangler deploy
 ```
 
-### 5-2. デプロイして新URLを確認する
+### 6-2. デプロイして新URLを確認する
 
 ```bash
 npx wrangler deploy
@@ -311,12 +301,11 @@ npx wrangler deploy
 > [!IMPORTANT]
 > **URLが変わる。** `workers.dev` のサブドメイン部分はアカウントごとに異なるため、
 > `https://audience-vote-app.<新しいサブドメイン>.workers.dev` になる。
-> 配布済みのQRコードや案内メールがある場合は差し替えが必要。
-> URLを固定したいなら「6. 独自ドメインを割り当てる」を先に実施すること。
+> 配布済みのQRコードがある場合は差し替えが必要。
 
-### 5-3. 移行後にやること
+### 6-3. 移行後にやること
 
-- KV namespace は**アカウント単位**なので、移行先で作り直す（3-4を再実施）
+- KV namespace は**アカウント単位**なので、移行先で作り直す（2-3を再実施）
 - 旧アカウント側の Worker を削除する（誤って古いURLが使われるのを防ぐ）
 
   ```bash
@@ -327,7 +316,7 @@ npx wrangler deploy
 
 ---
 
-## 6. 独自ドメインを割り当てる（オプション）
+## 7. 独自ドメインを割り当てる（オプション）
 
 社内コンテスト用途なら `workers.dev` のままで十分。URLを固定したい・社内ドメインで見せたい場合のみ実施する。
 
@@ -345,19 +334,12 @@ npx wrangler deploy
 
 ---
 
-## 7. ロールバックとトラブルシュート
+## 8. ロールバックとトラブルシュート
 
-### 7-1. 直前のバージョンに戻す
-
-デプロイ履歴を確認する。
+### 8-1. 直前のバージョンに戻す
 
 ```bash
 npx wrangler deployments list
-```
-
-戻したいバージョンIDを指定してロールバックする。
-
-```bash
 npx wrangler rollback <Version ID>
 ```
 
@@ -366,40 +348,31 @@ npx wrangler rollback <Version ID>
 > [!TIP]
 > 当日トラブルが起きたら、原因調査より先にロールバックして復旧させる。調査はその後でよい。
 
-### 7-2. リアルタイムでログを見る
-
-```bash
-npx wrangler tail
-```
-
-本番Workerのログとエラーが流れる。`/api/vote` が失敗している場合はここに出る。`Ctrl + C` で停止。
-
-### 7-3. よくある症状と対処
+### 8-2. よくある症状と対処
 
 | 症状 | 原因 | 対処 |
 |---|---|---|
 | デプロイしたのに古い画面が出る | ブラウザキャッシュ | スーパーリロード（Mac: `Cmd + Shift + R`）。または別端末・シークレットウィンドウで確認 |
-| 投票しても集計が0件 | Firebase未設定 or 投票データ未保存 | 3-1 / 3-2 を実施 |
-| 何度でも投票できてしまう | KV未バインド | 3-4 を実施 |
+| 何度でも投票できてしまう | KV未バインド、または本番用IDに差し替え忘れ | 2-3を実施、`wrangler.jsonc` の `kv_namespaces` を確認 |
+| 投票が500 `server_misconfigured` | `FIREBASE_DB_URL` の secret 未設定、または KV binding 名の誤り | `npx wrangler secret list` で確認し、2-3をやり直す |
 | 管理画面にログインできない | `firebase-config.js` の `audienceDemoAdmin` の値と不一致 | 該当ファイルの値を確認。変更後は再デプロイが必要 |
 | `wrangler deploy` で権限エラー | ログイン中のアカウントが違う | `npx wrangler whoami` で確認し、`logout` → `login` でやり直す |
-| ページが404になる | `wrangler.jsonc` の `assets.directory` の指定ミス | `"./"` のままか確認する |
-| `wrangler` コマンドが見つからない | Node.js未インストール | 2-1(1) を実施 |
+| ローカルで無限リロードになる | `wrangler dev` のKV永続化先がプロジェクト内 | `--persist-to` にプロジェクト外のパスを指定する（2-4参照） |
+| `/index.html`・`/admin.html` が直接200を返さず307になる | Cloudflare Workers Assets の既定の `html_handling`（`.html`を外した正規URLへリダイレクト） | 実害なし。ブラウザは自動で追従して200になる。直接200を期待するcurl確認では `-L` を付ける |
+| `wrangler` コマンドが見つからない | `npm install` 未実施 | 2-1(3) を実施 |
 
-### 7-4. 動いているコードを確認する
-
-デプロイされている実物を直接取得して確認できる。
+### 8-3. 動いているコードを確認する
 
 ```bash
-curl -sSI https://audience-vote-app.ry-oshiro.workers.dev/
-curl -sS  https://audience-vote-app.ry-oshiro.workers.dev/firebase-config.js
+curl -sSI https://<公開URL>/
+curl -sS  https://<公開URL>/firebase-config.js
 ```
 
 レスポンスヘッダに `server: cloudflare` が出れば Cloudflare Workers から配信されている。
 
 ---
 
-## 8. 将来の選択肢: GitHub Actions での自動デプロイ
+## 9. 将来の選択肢: GitHub Actions での自動デプロイ
 
 現状は手動 `npx wrangler deploy` 運用。このプロジェクトの規模とデプロイ頻度なら手動で十分であり、当面は変更不要。
 
