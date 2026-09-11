@@ -831,6 +831,41 @@ a:hover { color: var(--eyebrow); }
   letter-spacing: -0.01em;
 }
 
+.done-redo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  animation: kFadeUp 0.5s 1.3s both;
+}
+
+.done-redo__btn {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  background: transparent;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  padding: 11px 26px;
+  cursor: pointer;
+  --notch: 10px;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--notch)), calc(100% - var(--notch)) 100%, 0 100%);
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.done-redo__btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: #ffffff;
+}
+
+.done-redo__note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: rgba(255, 255, 255, 0.7);
+}
+
 /* ---------- キーフレーム ---------- */
 
 @keyframes kStreak {

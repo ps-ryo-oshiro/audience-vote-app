@@ -8,6 +8,7 @@ const summaryTableWrap = document.getElementById('summary-table-wrap');
 const globalResultsBody = document.getElementById('global-results-body');
 const totalVotesCount = document.getElementById('total-votes-count');
 const excludedVotesNote = document.getElementById('excluded-votes-note');
+const supersededVotesNote = document.getElementById('superseded-votes-note');
 
 const participationPanel = document.getElementById('participation-panel');
 const participationCounter = document.getElementById('participation-counter');
@@ -19,6 +20,7 @@ const adminState = {
   loggedIn: false,
   teams: [],
   votes: [],
+  supersededCount: 0,
   isOpen: true,
   subscribed: false,
   // 表示切替パネルを直前に組み立てたときの「顔ぶれ・名称・並び」の署名。
@@ -134,6 +136,38 @@ function assignRanks(sortedItems) {
   });
 }
 
+/* やり直しに対応するため、票は追記のまま残り、同一投票者の票が複数存在しうる。
+   同一 voterToken のうち votedAt が最新の1件だけを有効票とし、同時刻ならキー（時系列で単調増加する）の
+   大きいものを選ぶ。voterToken を持たない票は他と同一視せず、そのまま1件の有効票として扱う。
+   集計に使う票は必ずこの関数を通すこと（通さない経路を作ると票が二重計上される） */
+function selectEffectiveVotes(records) {
+  const latestByToken = new Map();
+  const standalone = [];
+
+  records.forEach((record) => {
+    const token = record && record.voterToken;
+    if (!token) {
+      standalone.push(record);
+      return;
+    }
+
+    const current = latestByToken.get(token);
+    if (!current || isNewerVote(record, current)) {
+      latestByToken.set(token, record);
+    }
+  });
+
+  const votes = standalone.concat(Array.from(latestByToken.values()));
+  return { votes, supersededCount: records.length - votes.length };
+}
+
+function isNewerVote(candidate, current) {
+  const candidateAt = typeof candidate.votedAt === 'number' ? candidate.votedAt : -Infinity;
+  const currentAt = typeof current.votedAt === 'number' ? current.votedAt : -Infinity;
+  if (candidateAt !== currentAt) return candidateAt > currentAt;
+  return String(candidate.key) > String(current.key);
+}
+
 /* どのチームにも一致しない teamId の票は、チームの得票には数えず「集計対象外」として件数だけ示す */
 function computeVoteCounts(teams, votes) {
   const countsById = new Map();
@@ -229,6 +263,16 @@ function renderGlobalResults(teams, votes) {
       excludedVotesNote.classList.add('hidden');
     }
   }
+
+  if (supersededVotesNote) {
+    if (adminState.supersededCount > 0) {
+      supersededVotesNote.textContent = `（やり直しにより無効 ${adminState.supersededCount}件）`;
+      supersededVotesNote.classList.remove('hidden');
+    } else {
+      supersededVotesNote.textContent = '';
+      supersededVotesNote.classList.add('hidden');
+    }
+  }
 }
 
 function determineWinner(teams, votes) {
@@ -255,10 +299,14 @@ function determineWinner(teams, votes) {
     : winners[0].title;
 }
 
+/* 有効票の絞り込みはここで1度だけ行い、以降の描画はすべて同じ結果を受け取る */
 function renderAggregates() {
-  renderGlobalResults(adminState.teams, adminState.votes);
-  renderSummaryTable(adminState.teams, adminState.votes);
-  determineWinner(adminState.teams, adminState.votes);
+  const { votes, supersededCount } = selectEffectiveVotes(adminState.votes);
+  adminState.supersededCount = supersededCount;
+
+  renderGlobalResults(adminState.teams, votes);
+  renderSummaryTable(adminState.teams, votes);
+  determineWinner(adminState.teams, votes);
 }
 
 function byEntryNoAndId(a, b) {
@@ -399,7 +447,8 @@ function subscribeToFirebase(db) {
   });
 
   db.ref('audienceApp/votes').on('value', (snapshot) => {
-    adminState.votes = Object.values(snapshot.val() || {});
+    /* 同一時刻の票の順序を決めるため、プッシュキーを保持する */
+    adminState.votes = Object.entries(snapshot.val() || {}).map(([key, vote]) => ({ key, ...vote }));
     renderAggregates();
   }, (error) => {
     console.error('votes の購読でエラーが発生しました。', error);
@@ -421,7 +470,8 @@ function fetchDashboardData() {
   const votes = getLocalStorageData('votes', []);
   const settings = getLocalStorageData('settings', { isOpen: true });
 
-  adminState.votes = votes;
+  /* デモモードの票は配列。並び順の位置をキーとして扱う */
+  adminState.votes = votes.map((vote, index) => ({ key: String(index).padStart(6, '0'), ...vote }));
   adminState.isOpen = !!settings.isOpen;
   handleTeamsUpdate(teams);
   renderAggregates();
