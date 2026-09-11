@@ -5,10 +5,11 @@
    UI層: テーマ切替・送信アニメーション・完了オーバーレイを担う。
    ========================================================= */
 
+/* imagePosition: band__visual の background-position。画像ごとに人物の構図が異なるため個別指定する */
 const SECTIONS = [
-  { key: 'life', name: 'ライフ部門', code: 'LIFE', no: '01', tagline: '暮らしの不便を解消する', image: 'assets/images/categories/life.webp' },
-  { key: 'local', name: 'ローカル部門', code: 'LOCAL', no: '02', tagline: '沖縄固有の不便を解消する', image: 'assets/images/categories/local.webp' },
-  { key: 'work', name: 'ワーク部門', code: 'WORK', no: '03', tagline: 'シゴトの不便を解消する', image: 'assets/images/categories/work.webp' }
+  { key: 'life', name: 'ライフ部門', code: 'LIFE', no: '01', tagline: '暮らしの不便を解消する', image: 'assets/images/categories/life.webp', imagePosition: 'center 30%' },
+  { key: 'local', name: 'ローカル部門', code: 'LOCAL', no: '02', tagline: '沖縄固有の不便を解消する', image: 'assets/images/categories/local.webp', imagePosition: 'center top' },
+  { key: 'work', name: 'ワーク部門', code: 'WORK', no: '03', tagline: 'シゴトの不便を解消する', image: 'assets/images/categories/work.webp', imagePosition: 'center top' }
 ];
 
 const DEFAULT_TEAMS = [
@@ -30,6 +31,7 @@ const appState = {
   teams: DEFAULT_TEAMS,
   hasVoted: false,
   selectedId: null,
+  activeSection: SECTIONS[0].key,
   phase: PHASE.IDLE
 };
 
@@ -215,10 +217,14 @@ function isLocked() {
   return !appState.isOpen || appState.hasVoted || appState.phase !== PHASE.IDLE;
 }
 
+function sectionAccentStyle(key) {
+  return `--section-accent: var(--band-accent-${escapeHtml(key)})`;
+}
+
 function renderTeams() {
   let index = 0;
 
-  const html = SECTIONS.map((section) => {
+  const blocksHtml = SECTIONS.map((section) => {
     const teams = appState.teams
       .filter((team) => team.section === section.key)
       .slice()
@@ -229,7 +235,7 @@ function renderTeams() {
       });
     const band = `
       <div class="band-clip">
-        <div class="band" style="--section-accent: var(--band-accent-${escapeHtml(section.key)})">
+        <div class="band" style="${sectionAccentStyle(section.key)}">
           <div class="band__info">
             <span class="band__no">CATEGORY ${escapeHtml(section.no)}</span>
             <span class="band__name">${escapeHtml(section.name)}</span>
@@ -237,13 +243,16 @@ function renderTeams() {
           </div>
           <span class="band__code">${escapeHtml(section.code)}</span>
         </div>
-        <div class="band__visual" style="background-image:url('${escapeHtml(section.image)}')">
+        <div class="band__visual" style="background-image:url('${escapeHtml(section.image)}');background-position:${escapeHtml(section.imagePosition)}">
           <span class="band__visual-overlay" aria-hidden="true"></span>
         </div>
       </div>`;
 
+    const isActive = section.key === appState.activeSection;
+    const panelAttrs = `data-section="${escapeHtml(section.key)}" role="tabpanel" id="panel-${escapeHtml(section.key)}" aria-labelledby="tab-${escapeHtml(section.key)}"`;
+
     if (!teams.length) {
-      return `<div class="section-block">${band}<div class="empty-box">エントリーがありません。</div></div>`;
+      return `<div class="section-block${isActive ? ' is-tab-active' : ''}" ${panelAttrs}>${band}<div class="empty-box">エントリーがありません。</div></div>`;
     }
 
     const cards = teams.map((team) => {
@@ -273,12 +282,56 @@ function renderTeams() {
         </label>`;
     }).join('');
 
-    return `<div class="section-block">${band}<div class="section-block__list">${cards}</div></div>`;
+    return `<div class="section-block${isActive ? ' is-tab-active' : ''}" ${panelAttrs}>${band}<div class="section-block__list">${cards}</div></div>`;
   }).join('');
 
-  sectionList.innerHTML = html;
+  const tabsHtml = `
+    <div class="vote-tabs" role="tablist" aria-label="部門切り替え">
+      ${SECTIONS.map((section) => {
+        const isActive = section.key === appState.activeSection;
+        return `
+          <button type="button" class="vote-tabs__btn${isActive ? ' is-active' : ''}" style="${sectionAccentStyle(section.key)}" role="tab" id="tab-${escapeHtml(section.key)}" aria-controls="panel-${escapeHtml(section.key)}" aria-selected="${isActive}" data-section-tab="${escapeHtml(section.key)}">
+            <span class="vote-tabs__label">${escapeHtml(section.name)}</span>
+            <span class="vote-tabs__dot" aria-hidden="true"></span>
+          </button>`;
+      }).join('')}
+    </div>`;
+
+  sectionList.innerHTML = tabsHtml + blocksHtml;
   if (entryCount) entryCount.textContent = `全${appState.teams.length}エントリー`;
   updateVoteStatus();
+}
+
+/* 動画プレイヤーを閉じ、VIDEOボタンの表示に戻す。sectionListのクリックハンドラ（開閉トグル）と
+   setActiveSection（タブ切り替え時の強制クローズ）の双方から呼ばれる共通処理 */
+function closeVideoPlayer(toggle, player) {
+  player.hidden = true;
+  player.innerHTML = '';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.textContent = 'VIDEO';
+}
+
+/* モバイルのタブ切り替え。768px以上はCSS側で常時全部門表示に戻すため無効化される */
+function setActiveSection(key) {
+  if (appState.activeSection === key) return;
+  appState.activeSection = key;
+
+  document.querySelectorAll('.vote-tabs__btn').forEach((btn) => {
+    const active = btn.dataset.sectionTab === key;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-selected', String(active));
+  });
+
+  document.querySelectorAll('.section-block').forEach((block) => {
+    const active = block.dataset.section === key;
+    block.classList.toggle('is-tab-active', active);
+    if (!active) {
+      block.querySelectorAll('.entry__video-toggle[aria-expanded="true"]').forEach((toggle) => {
+        const player = toggle.closest('.entry')?.querySelector('.entry__player');
+        if (player) closeVideoPlayer(toggle, player);
+      });
+    }
+  });
 }
 
 function submitLabelHtml(sending) {
@@ -306,6 +359,11 @@ function updateVoteStatus() {
       radio.checked = selected;
       radio.disabled = locked;
     }
+  });
+
+  const selectedTeam = appState.teams.find((team) => team.id === appState.selectedId);
+  document.querySelectorAll('.vote-tabs__btn').forEach((btn) => {
+    btn.classList.toggle('has-selection', !!selectedTeam && selectedTeam.section === btn.dataset.sectionTab);
   });
 
   setLoaderVisible(sending);
@@ -391,22 +449,24 @@ sectionList.addEventListener('change', (event) => {
 /* VIDEOボタンでカード内にiframeをインライン展開/収納する。
    iframe属性は自前で組み立て、DBの値（動画URL）をHTMLとして注入しない。 */
 sectionList.addEventListener('click', (event) => {
+  const tabBtn = event.target.closest('.vote-tabs__btn');
+  if (tabBtn) {
+    setActiveSection(tabBtn.dataset.sectionTab);
+    return;
+  }
+
   const toggle = event.target.closest('.entry__video-toggle');
   if (!toggle) return;
 
   const player = toggle.closest('.entry')?.querySelector('.entry__player');
   if (!player) return;
 
-  const isOpen = toggle.getAttribute('aria-expanded') === 'true';
-  player.innerHTML = '';
-
-  if (isOpen) {
-    player.hidden = true;
-    toggle.setAttribute('aria-expanded', 'false');
-    toggle.textContent = 'VIDEO';
+  if (toggle.getAttribute('aria-expanded') === 'true') {
+    closeVideoPlayer(toggle, player);
     return;
   }
 
+  player.innerHTML = '';
   const iframe = document.createElement('iframe');
   iframe.src = toggle.dataset.embedUrl;
   iframe.title = '紹介動画';

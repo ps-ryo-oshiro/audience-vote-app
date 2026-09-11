@@ -353,7 +353,7 @@ a:hover { color: var(--eyebrow); }
   height: 96px;
   margin: -4px -6px 0;
   background-size: cover;
-  background-position: center;
+  background-position: center; /* 部門ごとの実際の値はJS側のinline style（imagePosition）で上書きされる */
   --notch: 14px;
   clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--notch)), calc(100% - var(--notch)) 100%, 0 100%);
 }
@@ -371,6 +371,74 @@ a:hover { color: var(--eyebrow); }
 }
 
 .section-block__list { padding: 0 18px; }
+
+/* ---------- 部門タブ（スマホのみ。768px以上は全部門並列表示に戻す） ---------- */
+
+.vote-tabs {
+  position: sticky;
+  /* .vote-header の実高さ（padding 13px×2 + ロゴ28px相当）に合わせた値。
+     ヘッダーのpadding/ロゴサイズを変える場合はここも調整する。 */
+  top: 54px;
+  z-index: 7;
+  display: flex;
+  gap: 6px;
+  padding: 10px 18px;
+  background: var(--bg);
+  border-bottom: 2px solid var(--card-border);
+}
+
+.vote-tabs__btn {
+  position: relative;
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 2px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--sub);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 9px 4px;
+  cursor: pointer;
+  transform: skewX(var(--skew));
+}
+
+.vote-tabs__label {
+  display: inline-block;
+  white-space: nowrap;
+  transform: skewX(var(--skew-counter));
+}
+
+.vote-tabs__btn.is-active {
+  background: var(--band-bg);
+  border-color: var(--band-bg);
+  color: var(--band-fg);
+}
+
+[data-theme="light"] .vote-tabs__btn.is-active {
+  background: var(--section-accent, var(--band-bg));
+  border-color: var(--section-accent, var(--band-bg));
+}
+
+.vote-tabs__dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--yellow);
+  opacity: 0;
+  transform: skewX(var(--skew-counter));
+}
+
+.vote-tabs__btn.has-selection .vote-tabs__dot { opacity: 1; }
+
+@media (max-width: 767px) {
+  .section-block { display: none; }
+  .section-block.is-tab-active { display: block; }
+}
 
 /* ---------- エントリーカード ---------- */
 
@@ -832,6 +900,8 @@ a:hover { color: var(--eyebrow); }
   }
 
   .shell { max-width: none; }
+
+  .vote-tabs { display: none; }
 
   .vote-header { padding: 16px var(--pad-x); }
   .vote-header__brand-logo { height: 34px; }
