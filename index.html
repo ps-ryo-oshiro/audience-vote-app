@@ -44,10 +44,13 @@
 
         <div class="submit-bar">
           <p class="vote-message hidden" id="vote-message" role="status" aria-live="polite"></p>
-          <button type="submit" class="submit-btn" id="vote-submit" disabled>
-            <span class="submit-btn__label" id="vote-submit-label">アプリを選択してください</span>
-            <span class="submit-btn__shimmer" aria-hidden="true"></span>
-          </button>
+          <div class="submit-bar__actions">
+            <button type="submit" class="submit-btn" id="vote-submit" disabled>
+              <span class="submit-btn__label" id="vote-submit-label">アプリを選択してください</span>
+              <span class="submit-btn__shimmer" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="redo-btn hidden" id="vote-redo-inline">投票をやり直す</button>
+          </div>
         </div>
       </form>
     </div>
